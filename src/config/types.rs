@@ -5,13 +5,76 @@ pub struct Config {
     #[serde(default)]
     pub bar: BarConfig,
     #[serde(default)]
+    pub modules: ModulesConfig,
+    // Legacy clock config - will be removed in future versions
+    #[serde(default)]
     pub clock: ClockConfig,
+}
+
+/// Module configuration organized by zones
+#[derive(Debug, Deserialize, Clone, Default)]
+pub struct ModulesConfig {
+    #[serde(default)]
+    pub left: HalfModulesConfig,
+    #[serde(default)]
+    pub right: HalfModulesConfig,
+}
+
+/// Modules for one half of the bar (left or right of notch/center)
+#[derive(Debug, Deserialize, Clone, Default)]
+pub struct HalfModulesConfig {
+    /// Modules aligned to the outer edge (left edge for left half, right edge for right half)
+    #[serde(default, rename = "left")]
+    pub outer: Vec<ModuleConfig>,
+    /// Modules aligned to the inner edge (toward center/notch)
+    #[serde(default, rename = "right")]
+    pub inner: Vec<ModuleConfig>,
+}
+
+/// Configuration for a single module
+#[derive(Debug, Deserialize, Clone)]
+pub struct ModuleConfig {
+    /// Module type: "clock", "static", "battery", "cpu", etc.
+    #[serde(rename = "type")]
+    pub module_type: String,
+    /// Optional ID (auto-generated if not specified)
+    pub id: Option<String>,
+    /// Static text content (for "static" module)
+    pub text: Option<String>,
+    /// Icon (Nerd Font glyph)
+    pub icon: Option<String>,
+    /// Time format (for "clock" module)
+    pub format: Option<String>,
+    /// Font size override
+    pub font_size: Option<f64>,
+    /// Text color override
+    pub color: Option<String>,
+    /// Background color
+    pub background: Option<String>,
+    /// Border color
+    pub border_color: Option<String>,
+    /// Border width
+    pub border_width: Option<f64>,
+    /// Corner radius
+    pub corner_radius: Option<f64>,
+    /// Whether this is a flex-width module
+    #[serde(default)]
+    pub flex: bool,
+    /// Minimum width for flex modules
+    pub min_width: Option<f64>,
+    /// Maximum width for flex modules
+    pub max_width: Option<f64>,
+    /// Left margin
+    pub margin_left: Option<f64>,
+    /// Right margin
+    pub margin_right: Option<f64>,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
             bar: BarConfig::default(),
+            modules: ModulesConfig::default(),
             clock: ClockConfig::default(),
         }
     }
@@ -34,6 +97,9 @@ pub struct BarConfig {
     /// Font family
     #[serde(default = "default_font_family")]
     pub font_family: String,
+    /// Notch configuration
+    #[serde(default)]
+    pub notch: NotchConfig,
 }
 
 impl Default for BarConfig {
@@ -44,8 +110,49 @@ impl Default for BarConfig {
             text_color: default_text_color(),
             font_size: default_font_size(),
             font_family: default_font_family(),
+            notch: NotchConfig::default(),
         }
     }
+}
+
+/// Configuration for the fake notch on external displays
+#[derive(Debug, Deserialize, Clone)]
+pub struct NotchConfig {
+    /// Enable fake notch on displays without a real notch
+    #[serde(default)]
+    pub fake: bool,
+    /// Width of the fake notch in pixels
+    #[serde(default = "default_notch_width")]
+    pub width: f64,
+    /// Color of the fake notch (#RRGGBB or #RRGGBBAA)
+    #[serde(default = "default_notch_color")]
+    pub color: String,
+    /// Corner radius for the bottom corners of the fake notch
+    #[serde(default = "default_notch_corner_radius")]
+    pub corner_radius: f64,
+}
+
+impl Default for NotchConfig {
+    fn default() -> Self {
+        Self {
+            fake: false,
+            width: default_notch_width(),
+            color: default_notch_color(),
+            corner_radius: default_notch_corner_radius(),
+        }
+    }
+}
+
+fn default_notch_width() -> f64 {
+    200.0
+}
+
+fn default_notch_color() -> String {
+    "#000000".to_string()
+}
+
+fn default_notch_corner_radius() -> f64 {
+    8.0
 }
 
 #[derive(Debug, Deserialize, Clone)]

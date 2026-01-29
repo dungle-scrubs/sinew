@@ -10,7 +10,7 @@ use objc2_app_kit::{
 use objc2_foundation::{NSPoint, NSRect};
 
 use crate::config::{parse_hex_color, SharedConfig};
-use crate::modules::{Alignment, Clock, MouseEvent, PositionedModule, RenderContext};
+use crate::modules::{create_module_from_config, Alignment, Clock, ModuleWidth, MouseEvent, PositionedModule, RenderContext, Zone};
 use crate::window::WindowPosition;
 
 thread_local! {
@@ -32,6 +32,14 @@ struct RenderCache {
     modules: Vec<PositionedModule>,
     bg_color: (f64, f64, f64, f64),
     text_color: (f64, f64, f64, f64),
+    // Fake notch settings (only used for Full window position)
+    fake_notch: Option<FakeNotchSettings>,
+}
+
+struct FakeNotchSettings {
+    width: f64,
+    color: (f64, f64, f64, f64),
+    corner_radius: f64,
 }
 
 static CONFIG_VERSION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -242,36 +250,93 @@ impl BarView {
                 let text_color = parse_hex_color(&config.bar.text_color)
                     .unwrap_or((0.8, 0.85, 0.95, 1.0));
 
-                // Create modules based on config
+                // Create modules based on config and window position
                 let mut modules = Vec::new();
 
-                // Only add clock on right/full window
-                let should_add_clock = match state.window_position {
-                    WindowPosition::Right | WindowPosition::Full => true,
-                    WindowPosition::Left => false,
+                // Helper to create modules from a zone's config
+                let create_modules = |zone_configs: &[crate::config::ModuleConfig], zone: Zone| -> Vec<PositionedModule> {
+                    zone_configs.iter().enumerate().filter_map(|(i, cfg)| {
+                        create_module_from_config(
+                            cfg,
+                            i,
+                            &config.bar.font_family,
+                            config.bar.font_size,
+                            &config.bar.text_color,
+                        ).map(|created| PositionedModule::new_with_flex(
+                            created.module,
+                            zone,
+                            created.flex,
+                            created.min_width,
+                            created.max_width,
+                        ))
+                    }).collect()
                 };
 
-                if should_add_clock {
-                    let alignment = match config.clock.position.as_str() {
-                        "left" => Alignment::Left,
-                        "center" => Alignment::Center,
-                        _ => Alignment::Right,
+                // Determine which zones to use based on window position
+                match state.window_position {
+                    WindowPosition::Left => {
+                        // Left window: use modules.left (outer = left edge, inner = right edge)
+                        modules.extend(create_modules(&config.modules.left.outer, Zone::Outer));
+                        modules.extend(create_modules(&config.modules.left.inner, Zone::Inner));
+                    }
+                    WindowPosition::Right => {
+                        // Right window: use modules.right (outer = right edge, inner = left edge)
+                        // For right window, outer aligns to right, inner aligns to left
+                        modules.extend(create_modules(&config.modules.right.inner, Zone::Outer));
+                        modules.extend(create_modules(&config.modules.right.outer, Zone::Inner));
+                    }
+                    WindowPosition::Full => {
+                        // Full window: use all four zones
+                        // left.left (outer) at left edge
+                        modules.extend(create_modules(&config.modules.left.outer, Zone::Outer));
+                        // right.right (outer) at right edge - treat as inner for layout
+                        modules.extend(create_modules(&config.modules.right.outer, Zone::Inner));
+                    }
+                }
+
+                // Fallback: if no modules configured, use legacy clock config
+                if modules.is_empty() {
+                    let should_add_clock = match state.window_position {
+                        WindowPosition::Right | WindowPosition::Full => true,
+                        WindowPosition::Left => false,
                     };
 
-                    let clock = Clock::new(
-                        &config.clock.format,
-                        &config.bar.font_family,
-                        config.bar.font_size,
-                        &config.bar.text_color,
-                    );
+                    if should_add_clock {
+                        let alignment = match config.clock.position.as_str() {
+                            "left" => Alignment::Left,
+                            "center" => Alignment::Center,
+                            _ => Alignment::Right,
+                        };
 
-                    modules.push(PositionedModule::new(Box::new(clock), alignment));
+                        let clock = Clock::new(
+                            &config.clock.format,
+                            &config.bar.font_family,
+                            config.bar.font_size,
+                            &config.bar.text_color,
+                        );
+
+                        modules.push(PositionedModule::new_with_alignment(Box::new(clock), alignment));
+                    }
                 }
+
+                // Set up fake notch for Full window if enabled
+                let fake_notch = if matches!(state.window_position, WindowPosition::Full) && config.bar.notch.fake {
+                    let notch_color = parse_hex_color(&config.bar.notch.color)
+                        .unwrap_or((0.0, 0.0, 0.0, 1.0));
+                    Some(FakeNotchSettings {
+                        width: config.bar.notch.width,
+                        color: notch_color,
+                        corner_radius: config.bar.notch.corner_radius,
+                    })
+                } else {
+                    None
+                };
 
                 state.cache = Some(RenderCache {
                     modules,
                     bg_color,
                     text_color,
+                    fake_notch,
                 });
                 state.config_version = current_version;
             }
@@ -292,6 +357,53 @@ impl BarView {
         bg_color.set();
         NSRectFill(bounds);
 
+        // Draw fake notch if enabled (only for Full window position)
+        let notch_exclusion_zone = if let Some(ref notch) = cache.fake_notch {
+            let bar_width = bounds.size.width;
+            let bar_height = bounds.size.height;
+            let notch_x = (bar_width - notch.width) / 2.0;
+
+            // Draw notch shape - a rectangle that hangs down from the top with rounded bottom corners
+            let (nr, ng, nb, na) = notch.color;
+            let notch_color = NSColor::colorWithSRGBRed_green_blue_alpha(nr, ng, nb, na);
+            notch_color.set();
+
+            // Draw the notch as a filled bezier path with rounded bottom corners
+            use objc2_app_kit::NSBezierPath;
+
+            let path = NSBezierPath::new();
+            let radius = notch.corner_radius;
+
+            // Start at top-left of notch
+            path.moveToPoint(NSPoint::new(notch_x, bar_height));
+            // Line down the left side
+            path.lineToPoint(NSPoint::new(notch_x, radius));
+            // Bottom-left rounded corner
+            path.curveToPoint_controlPoint1_controlPoint2(
+                NSPoint::new(notch_x + radius, 0.0),
+                NSPoint::new(notch_x, 0.0),
+                NSPoint::new(notch_x, 0.0),
+            );
+            // Line across the bottom
+            path.lineToPoint(NSPoint::new(notch_x + notch.width - radius, 0.0));
+            // Bottom-right rounded corner
+            path.curveToPoint_controlPoint1_controlPoint2(
+                NSPoint::new(notch_x + notch.width, radius),
+                NSPoint::new(notch_x + notch.width, 0.0),
+                NSPoint::new(notch_x + notch.width, 0.0),
+            );
+            // Line up the right side
+            path.lineToPoint(NSPoint::new(notch_x + notch.width, bar_height));
+            // Close the path
+            path.closePath();
+            path.fill();
+
+            // Return the exclusion zone (center region where modules shouldn't go)
+            Some((notch_x, notch_x + notch.width))
+        } else {
+            None
+        };
+
         if cache.modules.is_empty() {
             return;
         }
@@ -311,28 +423,80 @@ impl BarView {
         let bar_width = bounds.size.width;
         let bar_height = bounds.size.height;
 
-        // Layout modules by alignment
-        let mut left_x = padding;
-        let mut right_x = bar_width - padding;
+        // First pass: calculate fixed module widths and count flex modules
+        let mut fixed_width_total = 0.0;
+        let mut flex_count = 0;
+        let mut flex_min_total = 0.0;
+
+        for positioned in cache.modules.iter_mut() {
+            positioned.natural_width = positioned.module.measure().width;
+            match positioned.width_mode {
+                ModuleWidth::Fixed => {
+                    fixed_width_total += positioned.natural_width + padding;
+                }
+                ModuleWidth::Flex { min, .. } => {
+                    flex_count += 1;
+                    flex_min_total += min;
+                    fixed_width_total += padding; // padding still applies
+                }
+            }
+        }
+
+        // Calculate notch exclusion zone boundaries
+        let (outer_max_x, inner_min_x) = if let Some((notch_start, notch_end)) = notch_exclusion_zone {
+            // Outer modules stop before notch, inner modules start after notch
+            (notch_start - padding, notch_end + padding)
+        } else {
+            // No notch - modules can use full width (outer and inner meet in middle)
+            (bar_width / 2.0, bar_width / 2.0)
+        };
+
+        // Calculate available space for flex modules (accounting for notch exclusion)
+        let notch_width = if notch_exclusion_zone.is_some() {
+            cache.fake_notch.as_ref().map(|n| n.width).unwrap_or(0.0) + padding * 2.0
+        } else {
+            0.0
+        };
+        let available_for_flex = (bar_width - fixed_width_total - padding - notch_width).max(flex_min_total);
+        let flex_width_each = if flex_count > 0 {
+            available_for_flex / flex_count as f64
+        } else {
+            0.0
+        };
+
+        // Assign widths to flex modules
+        for positioned in cache.modules.iter_mut() {
+            if let ModuleWidth::Flex { min, max } = positioned.width_mode {
+                positioned.width = flex_width_each.max(min).min(max);
+            } else {
+                positioned.width = positioned.natural_width;
+            }
+        }
+
+        // Second pass: position modules by zone
+        // Outer zone: starts at left edge, grows right (stops at notch)
+        // Inner zone: starts at right edge, grows left (stops at notch)
+        let mut outer_x = padding;
+        let mut inner_x = bar_width - padding;
 
         for positioned in &mut cache.modules {
-            let size = positioned.module.measure();
-
-            match positioned.alignment {
-                Alignment::Left => {
-                    positioned.x = left_x;
-                    positioned.width = size.width;
-                    left_x += size.width + padding;
+            match positioned.zone {
+                Zone::Outer => {
+                    positioned.x = outer_x;
+                    outer_x += positioned.width + padding;
+                    // Clamp to not exceed notch boundary
+                    if outer_x > outer_max_x {
+                        outer_x = outer_max_x;
+                    }
                 }
-                Alignment::Center => {
-                    positioned.x = (bar_width - size.width) / 2.0;
-                    positioned.width = size.width;
-                }
-                Alignment::Right => {
-                    right_x -= size.width;
-                    positioned.x = right_x;
-                    positioned.width = size.width;
-                    right_x -= padding;
+                Zone::Inner => {
+                    inner_x -= positioned.width;
+                    // Clamp to not go before notch boundary
+                    if inner_x < inner_min_x {
+                        inner_x = inner_min_x;
+                    }
+                    positioned.x = inner_x;
+                    inner_x -= padding;
                 }
             }
         }

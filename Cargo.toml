@@ -1,0 +1,43 @@
+[package]
+name = "rustybar"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = [
+    "NSString",
+    "NSArray",
+    "NSGeometry",
+    "NSDictionary",
+    "NSNotification",
+    "NSRunLoop",
+    "NSThread",
+    "NSProcessInfo",
+] }
+objc2-app-kit = { version = "0.3", features = [
+    "NSApplication",
+    "NSWindow",
+    "NSView",
+    "NSScreen",
+    "NSColor",
+    "NSGraphics",
+    "NSResponder",
+    "NSRunningApplication",
+    "NSStatusBar",
+    "NSGraphicsContext",
+    "NSEvent",
+    "NSTrackingArea",
+] }
+block2 = "0.6"
+core-graphics = "0.24"
+foreign-types = "0.5"
+core-foundation = "0.10"
+core-text = "21"
+toml = "0.8"
+serde = { version = "1", features = ["derive"] }
+chrono = "0.4"
+log = "0.4"
+env_logger = "0.11"
+dirs = "6"
+notify = "7"

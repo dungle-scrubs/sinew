@@ -1,0 +1,24 @@
+# RustyBar Configuration
+# Copy this file to ~/.config/rustybar/config.toml
+
+[bar]
+# Height in pixels, or "auto" to match system menu bar
+height = "auto"
+
+# Background color (hex format: #RRGGBB or #RRGGBBAA)
+background_color = "#1e1e2e"
+
+# Text color
+text_color = "#cdd6f4"
+
+# Font settings
+font_family = "SF Pro"
+font_size = 13.0
+
+[clock]
+# Time format (uses chrono strftime format)
+# %a = weekday abbrev, %b = month abbrev, %d = day, %H = hour, %M = minute, %S = second
+format = "%a %b %d  %H:%M:%S"
+
+# Position: "left", "center", or "right"
+position = "right"

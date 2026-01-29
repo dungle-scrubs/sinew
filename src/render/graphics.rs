@@ -52,7 +52,8 @@ impl Graphics {
         let mut attr_string = CFMutableAttributedString::new();
         attr_string.replace_str(&cf_string, CFRange::init(0, 0));
 
-        let range = CFRange::init(0, text.len() as isize);
+        // Use CFString length (UTF-16 code units), not byte length
+        let range = CFRange::init(0, cf_string.char_len() as isize);
 
         // Set font attribute using the kCTFontAttributeName constant
         unsafe {
@@ -98,7 +99,8 @@ impl Graphics {
         let mut attr_string = CFMutableAttributedString::new();
         attr_string.replace_str(&cf_string, CFRange::init(0, 0));
 
-        let range = CFRange::init(0, text.len() as isize);
+        // Use CFString length (UTF-16 code units), not byte length
+        let range = CFRange::init(0, cf_string.char_len() as isize);
 
         unsafe {
             attr_string.set_attribute(range, kCTFontAttributeName, &self.font);

@@ -50,7 +50,7 @@ fn prevent_window_activation(window: &NSWindow) {
 
 /// Window level 24 = NSMainMenuWindowLevel (below notifications).
 /// Combined with kCGSPreventsActivationTagBit, clicks don't steal focus.
-const STATUS_WINDOW_LEVEL: isize = 24;
+const STATUS_WINDOW_LEVEL: isize = 25;
 
 // Custom NSWindow subclass that cannot become key window (prevents stealing focus)
 define_class!(

@@ -75,7 +75,13 @@ impl Weather {
                 condition,
                 icon,
             } => Some(format!("{} {} {}", icon, temp, condition)),
-            WeatherState::Error(msg) => Some(format!(" {}", msg)),
+            WeatherState::Error(msg) => {
+                if self.show_while_loading {
+                    Some(format!(" {}", msg))
+                } else {
+                    None
+                }
+            }
         }
     }
 }

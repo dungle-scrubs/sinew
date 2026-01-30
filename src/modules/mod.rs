@@ -139,6 +139,12 @@ pub struct PositionedModule {
     pub group: Option<String>,
     /// Popup configuration
     pub popup: Option<PopupConfig>,
+    /// Whether toggle behavior is enabled
+    pub toggle_enabled: bool,
+    /// Current toggle state (on/off)
+    pub toggle_active: bool,
+    /// Toggle group ID for radio-button behavior
+    pub toggle_group: Option<String>,
 }
 
 impl PositionedModule {
@@ -162,6 +168,9 @@ impl PositionedModule {
             right_click_command: None,
             group: None,
             popup: None,
+            toggle_enabled: false,
+            toggle_active: false,
+            toggle_group: None,
         }
     }
 
@@ -176,6 +185,8 @@ impl PositionedModule {
         right_click_command: Option<String>,
         group: Option<String>,
         popup: Option<PopupConfig>,
+        toggle_enabled: bool,
+        toggle_group: Option<String>,
     ) -> Self {
         let size = module.measure();
         let alignment = match zone {
@@ -203,6 +214,9 @@ impl PositionedModule {
             right_click_command,
             group,
             popup,
+            toggle_enabled,
+            toggle_active: false,
+            toggle_group,
         }
     }
 
@@ -225,11 +239,19 @@ impl PositionedModule {
             right_click_command: None,
             group: None,
             popup: None,
+            toggle_enabled: false,
+            toggle_active: false,
+            toggle_group: None,
         }
     }
 
+    /// Check if a point is within the module's clickable area.
+    /// This includes padding, so the clickable area matches the visual background.
     pub fn contains_point(&self, x: f64) -> bool {
-        x >= self.x && x < self.x + self.width
+        let padding = self.style.padding;
+        let left = self.x - padding;
+        let right = self.x + self.width + padding;
+        x >= left && x < right
     }
 
     pub fn is_flex(&self) -> bool {
@@ -260,6 +282,12 @@ pub struct ModuleStyle {
     pub critical_threshold: f64,
     /// Threshold for warning state
     pub warning_threshold: f64,
+    /// Background color when toggle is active
+    pub active_background: Option<(f64, f64, f64, f64)>,
+    /// Border color when toggle is active
+    pub active_border_color: Option<(f64, f64, f64, f64)>,
+    /// Text color when toggle is active
+    pub active_text_color: Option<(f64, f64, f64, f64)>,
 }
 
 /// Popup anchor position
@@ -299,6 +327,8 @@ pub struct CreatedModule {
     pub right_click_command: Option<String>,
     pub group: Option<String>,
     pub popup: Option<PopupConfig>,
+    pub toggle_enabled: bool,
+    pub toggle_group: Option<String>,
 }
 
 /// Create a module from config
@@ -476,6 +506,18 @@ pub fn create_module_from_config(
             .and_then(|c| crate::config::parse_hex_color(c)),
         critical_threshold: config.critical_threshold.unwrap_or(20.0),
         warning_threshold: config.warning_threshold.unwrap_or(40.0),
+        active_background: config
+            .active_background
+            .as_ref()
+            .and_then(|c| crate::config::parse_hex_color(c)),
+        active_border_color: config
+            .active_border_color
+            .as_ref()
+            .and_then(|c| crate::config::parse_hex_color(c)),
+        active_text_color: config
+            .active_color
+            .as_ref()
+            .and_then(|c| crate::config::parse_hex_color(c)),
     };
 
     // Parse popup config if present
@@ -505,5 +547,7 @@ pub fn create_module_from_config(
         right_click_command: config.right_click_command.clone(),
         group: config.group.clone(),
         popup,
+        toggle_enabled: config.toggle,
+        toggle_group: config.toggle_group.clone(),
     })
 }

@@ -1,17 +1,17 @@
 use std::sync::{Arc, RwLock};
 
-use objc2::MainThreadMarker;
 use objc2::rc::Retained;
+use objc2::MainThreadMarker;
 use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy, NSEvent};
 use objc2_foundation::NSDate;
 
-use crate::config::{ConfigWatcher, SharedConfig, load_config};
+use crate::config::{load_config, ConfigWatcher, SharedConfig};
 use chrono::Datelike;
 
-use crate::view::{BarView, PanelContent, PanelView, PopupContent, PopupView, bump_config_version};
+use crate::view::{bump_config_version, BarView, PanelContent, PanelView, PopupContent, PopupView};
 use crate::window::{
-    BarWindow, MouseEventKind, MouseMonitor, Panel, PopupWindow, WindowBounds, WindowPosition,
-    get_main_screen_info,
+    get_main_screen_info, BarWindow, MouseEventKind, MouseMonitor, Panel, PopupWindow,
+    WindowBounds, WindowPosition,
 };
 
 pub struct App {
@@ -21,6 +21,7 @@ pub struct App {
     config: SharedConfig,
     config_watcher: Option<ConfigWatcher>,
     _mouse_monitor: Option<MouseMonitor>,
+    _menu_bar_monitor: Option<Retained<objc2::runtime::AnyObject>>,
     // Current popup state
     popup: Option<ActivePopup>,
     // Full-width panel
@@ -28,6 +29,7 @@ pub struct App {
     panel_view: Option<Retained<PanelView>>,
     // Store screen info for panel creation
     bar_y: f64,
+    bar_height: f64,
     screen_width: f64,
     screen_height: f64,
 }
@@ -35,8 +37,10 @@ pub struct App {
 struct ActivePopup {
     window: PopupWindow,
     _view: Retained<PopupView>,
-    /// Module ID that opened this popup (to toggle on re-click)
+    /// Module X position that opened this popup (to toggle on re-click)
     module_x: f64,
+    /// Index of the bar window (for clearing popup gap)
+    bar_window_idx: usize,
 }
 
 impl App {
@@ -64,7 +68,18 @@ impl App {
         let (windows, views, mouse_monitor, screen_info) = Self::create_windows(mtm, &config);
 
         // Extract screen dimensions for panel
-        let (bar_y, screen_width, screen_height) = screen_info.unwrap_or((0.0, 0.0, 0.0));
+        let (bar_y, bar_height, screen_width, screen_height) =
+            screen_info.unwrap_or((0.0, 32.0, 0.0, 0.0));
+
+        // Start menu bar monitor if autohide is enabled
+        let autohide_enabled = config.read().map(|c| c.bar.autohide).unwrap_or(false);
+
+        let menu_bar_monitor = if autohide_enabled {
+            let ns_windows: Vec<_> = windows.iter().map(|w| w.window.clone()).collect();
+            crate::window::start_menu_bar_monitor(mtm, ns_windows, screen_height, bar_height)
+        } else {
+            None
+        };
 
         Self {
             _app: app,
@@ -73,10 +88,12 @@ impl App {
             config,
             config_watcher,
             _mouse_monitor: mouse_monitor,
+            _menu_bar_monitor: menu_bar_monitor,
             popup: None,
             panel: None,
             panel_view: None,
             bar_y,
+            bar_height,
             screen_width,
             screen_height,
         }
@@ -89,12 +106,12 @@ impl App {
         Vec<BarWindow>,
         Vec<Retained<BarView>>,
         Option<MouseMonitor>,
-        Option<(f64, f64, f64)>, // bar_y, screen_width, screen_height
+        Option<(f64, f64, f64, f64)>, // bar_y, bar_height, screen_width, screen_height
     ) {
         let mut windows = Vec::new();
         let mut views = Vec::new();
         let mut window_bounds = Vec::new();
-        let mut screen_dimensions: Option<(f64, f64, f64)> = None;
+        let mut screen_dimensions: Option<(f64, f64, f64, f64)> = None;
 
         let height = config
             .read()
@@ -117,7 +134,7 @@ impl App {
             );
 
             // Store screen dimensions for panel creation
-            screen_dimensions = Some((window_y, screen_width, screen_height));
+            screen_dimensions = Some((window_y, height, screen_width, screen_height));
 
             if screen_info.has_notch {
                 let left_window = BarWindow::new(mtm, &screen_info, WindowPosition::Left, height);
@@ -201,8 +218,28 @@ impl App {
         (windows, views, mouse_monitor, screen_dimensions)
     }
 
+    fn close_popup(&mut self) {
+        if let Some(popup) = self.popup.take() {
+            popup.window.hide();
+            // Clear the popup gap on the bar
+            if popup.bar_window_idx < self.windows.len() {
+                crate::view::set_popup_gap(&self.windows[popup.bar_window_idx].window, None);
+            }
+        }
+    }
+
     pub fn run(mut self, mtm: MainThreadMarker) {
         let app = NSApplication::sharedApplication(mtm);
+
+        // Start workspace monitor for app focus events
+        crate::window::start_workspace_monitor();
+
+        // Read hover effects config
+        let hover_effects_enabled = self
+            .config
+            .read()
+            .map(|c| c.bar.hover_effects)
+            .unwrap_or(true);
 
         // Set up a background thread for config watching
         let config_watcher = self.config_watcher.take();
@@ -220,10 +257,13 @@ impl App {
             }
         });
 
-        // Track which window was previously hovered
+        // Track which window was previously hovered (only used if hover_effects enabled)
         let mut last_hover_window: Option<usize> = None;
-        // Track mouse button states for click detection
+        // Track mouse button states for click detection (only used if hover_effects enabled)
         let mut last_mouse_buttons: usize = 0;
+        // Track last module update time
+        let mut last_module_update = std::time::Instant::now();
+        let module_update_interval = std::time::Duration::from_secs(1);
 
         // Run a manual event loop that also handles redraws
         loop {
@@ -242,16 +282,20 @@ impl App {
                 app.updateWindows();
             }
 
-            // Poll mouse position and check for hover
-            // Use mouseLocationOutsideOfEventStream for reliable position tracking
-            let mut current_hover: Option<(usize, f64, f64)> = None;
+            // Periodically update modules (battery, volume, etc.)
+            if last_module_update.elapsed() >= module_update_interval {
+                for window in &self.windows {
+                    crate::view::update_modules(&window.window);
+                }
+                last_module_update = std::time::Instant::now();
+            }
 
+            // Always track which window the mouse is over (needed for click handling)
+            let mut current_hover: Option<(usize, f64, f64)> = None;
             for (i, window) in self.windows.iter().enumerate() {
-                // Get mouse position relative to this window
                 let local_loc = window.window.mouseLocationOutsideOfEventStream();
                 let frame = window.window.frame();
 
-                // Check if mouse is inside this window's content area
                 if local_loc.x >= 0.0
                     && local_loc.x <= frame.size.width
                     && local_loc.y >= 0.0
@@ -262,79 +306,85 @@ impl App {
                 }
             }
 
-            // Handle hover state changes and update cursor
-            match (current_hover, last_hover_window) {
-                (Some((idx, x, y)), None) => {
-                    // Entered a window
-                    log::debug!("Mouse entered window {} at ({:.1}, {:.1})", idx, x, y);
-                    if let Some(view) = self.windows[idx].window.contentView() {
-                        let view_id = &*view as *const _ as usize;
-                        crate::view::handle_mouse_event(
-                            view_id,
-                            MouseEventKind::Entered,
-                            x,
-                            y,
-                            &self.config,
-                        );
+            // Handle hover state changes for visual effects (if enabled)
+            if hover_effects_enabled {
+                match (current_hover, last_hover_window) {
+                    (Some((idx, x, y)), None) => {
+                        log::debug!("Mouse entered window {} at ({:.1}, {:.1})", idx, x, y);
+                        if let Some(view) = self.windows[idx].window.contentView() {
+                            let view_id = &*view as *const _ as usize;
+                            crate::view::handle_mouse_event(
+                                view_id,
+                                MouseEventKind::Entered,
+                                x,
+                                y,
+                                &self.config,
+                            );
+                        }
                     }
+                    (None, Some(old_idx)) => {
+                        log::debug!("Mouse exited window {}", old_idx);
+                        if let Some(view) = self.windows[old_idx].window.contentView() {
+                            let view_id = &*view as *const _ as usize;
+                            crate::view::handle_mouse_event(
+                                view_id,
+                                MouseEventKind::Exited,
+                                0.0,
+                                0.0,
+                                &self.config,
+                            );
+                        }
+                    }
+                    (Some((idx, x, y)), Some(old_idx)) if idx != old_idx => {
+                        log::debug!("Mouse moved from window {} to {}", old_idx, idx);
+                        if let Some(view) = self.windows[old_idx].window.contentView() {
+                            let view_id = &*view as *const _ as usize;
+                            crate::view::handle_mouse_event(
+                                view_id,
+                                MouseEventKind::Exited,
+                                0.0,
+                                0.0,
+                                &self.config,
+                            );
+                        }
+                        if let Some(view) = self.windows[idx].window.contentView() {
+                            let view_id = &*view as *const _ as usize;
+                            crate::view::handle_mouse_event(
+                                view_id,
+                                MouseEventKind::Entered,
+                                x,
+                                y,
+                                &self.config,
+                            );
+                        }
+                    }
+                    (Some((idx, x, y)), Some(_)) => {
+                        if let Some(view) = self.windows[idx].window.contentView() {
+                            let view_id = &*view as *const _ as usize;
+                            crate::view::handle_mouse_event(
+                                view_id,
+                                MouseEventKind::Moved,
+                                x,
+                                y,
+                                &self.config,
+                            );
+                        }
+                    }
+                    _ => {}
                 }
-                (None, Some(old_idx)) => {
-                    // Exited a window
-                    log::debug!("Mouse exited window {}", old_idx);
-                    if let Some(view) = self.windows[old_idx].window.contentView() {
-                        let view_id = &*view as *const _ as usize;
-                        crate::view::handle_mouse_event(
-                            view_id,
-                            MouseEventKind::Exited,
-                            0.0,
-                            0.0,
-                            &self.config,
-                        );
-                    }
-                }
-                (Some((idx, x, y)), Some(old_idx)) if idx != old_idx => {
-                    // Moved between windows
-                    log::debug!("Mouse moved from window {} to {}", old_idx, idx);
-                    if let Some(view) = self.windows[old_idx].window.contentView() {
-                        let view_id = &*view as *const _ as usize;
-                        crate::view::handle_mouse_event(
-                            view_id,
-                            MouseEventKind::Exited,
-                            0.0,
-                            0.0,
-                            &self.config,
-                        );
-                    }
-                    if let Some(view) = self.windows[idx].window.contentView() {
-                        let view_id = &*view as *const _ as usize;
-                        crate::view::handle_mouse_event(
-                            view_id,
-                            MouseEventKind::Entered,
-                            x,
-                            y,
-                            &self.config,
-                        );
-                    }
-                }
-                (Some((idx, x, y)), Some(_)) => {
-                    // Mouse moved within same window - update position
-                    if let Some(view) = self.windows[idx].window.contentView() {
-                        let view_id = &*view as *const _ as usize;
-                        crate::view::handle_mouse_event(
-                            view_id,
-                            MouseEventKind::Moved,
-                            x,
-                            y,
-                            &self.config,
-                        );
-                    }
-                }
-                _ => {}
+                last_hover_window = current_hover.map(|(i, _, _)| i);
             }
-            last_hover_window = current_hover.map(|(i, _, _)| i);
 
             // Detect clicks by polling mouse button state
             let current_buttons = NSEvent::pressedMouseButtons();
+            if current_buttons != last_mouse_buttons {
+                log::debug!(
+                    "Button state changed: {} -> {}, hover: {:?}",
+                    last_mouse_buttons,
+                    current_buttons,
+                    current_hover
+                );
+            }
             if let Some((idx, x, y)) = current_hover {
                 // Detect button releases (button was down, now up)
                 let left_released = (last_mouse_buttons & 1) != 0 && (current_buttons & 1) == 0;
@@ -361,19 +411,61 @@ impl App {
 
                         // Handle popup showing/hiding
                         if let Some(info) = popup_info {
+                            log::debug!(
+                                "Got popup_info: type={}, x={}, width={}",
+                                info.popup_type,
+                                info.module_x,
+                                info.module_width
+                            );
                             // Handle panel type specially - before popup handling
                             if info.popup_type == "panel" {
                                 log::debug!("Panel click detected, toggling panel");
 
                                 // Close any existing popup first
-                                if let Some(popup) = self.popup.take() {
-                                    popup.window.hide();
-                                }
+                                self.close_popup();
 
                                 // Toggle the full-width panel
                                 if let Some(ref mut panel) = self.panel {
+                                    let was_visible = panel.is_visible();
                                     panel.toggle();
+                                    // Update bar border visibility
+                                    crate::view::set_panel_visible(&self.windows, !was_visible);
                                 } else {
+                                    // Get border and color config for panel
+                                    let (
+                                        border_color,
+                                        border_width,
+                                        popup_bg,
+                                        popup_text,
+                                        font_family,
+                                        font_size,
+                                    ) = {
+                                        let config = self.config.read().unwrap();
+                                        let color = config
+                                            .bar
+                                            .border_color
+                                            .as_ref()
+                                            .and_then(|c| crate::config::parse_hex_color(c));
+                                        let popup_bg = config
+                                            .bar
+                                            .popup_background_color
+                                            .clone()
+                                            .unwrap_or_else(|| config.bar.background_color.clone());
+                                        let popup_text = config
+                                            .bar
+                                            .popup_text_color
+                                            .clone()
+                                            .unwrap_or_else(|| config.bar.text_color.clone());
+                                        (
+                                            color,
+                                            config.bar.border_width,
+                                            popup_bg,
+                                            popup_text,
+                                            config.bar.font_family.clone(),
+                                            config.bar.font_size,
+                                        )
+                                    };
+
                                     // Create panel content with just a few lines for testing auto-height
                                     let test_lines: Vec<String> = vec![
                                         "Line 1: Testing auto-height".to_string(),
@@ -382,8 +474,16 @@ impl App {
                                     ];
 
                                     // Create panel view and get its content height
-                                    let (panel_view, content_height) =
-                                        PanelView::new(mtm, PanelContent::Text(test_lines));
+                                    let (panel_view, content_height) = PanelView::new(
+                                        mtm,
+                                        PanelContent::Text(test_lines),
+                                        border_color,
+                                        border_width,
+                                        &popup_bg,
+                                        &popup_text,
+                                        &font_family,
+                                        font_size,
+                                    );
 
                                     // Max height is 50% of screen height
                                     let max_height = self.screen_height * 0.5;
@@ -402,6 +502,9 @@ impl App {
                                     // Make the view first responder to receive scroll events
                                     panel.make_first_responder(&panel_view);
 
+                                    // Hide bar border when panel is shown
+                                    crate::view::set_panel_visible(&self.windows, true);
+
                                     self.panel = Some(panel);
                                     self.panel_view = Some(panel_view);
                                 }
@@ -412,7 +515,10 @@ impl App {
 
                             // Close panel when opening a regular popup
                             if let Some(ref mut panel) = self.panel {
-                                panel.hide();
+                                if panel.is_visible() {
+                                    panel.hide();
+                                    crate::view::set_panel_visible(&self.windows, false);
+                                }
                             }
 
                             // Check if clicking same module that has popup open - toggle it
@@ -423,14 +529,10 @@ impl App {
 
                             if should_close {
                                 // Close existing popup
-                                if let Some(popup) = self.popup.take() {
-                                    popup.window.hide();
-                                }
+                                self.close_popup();
                             } else {
                                 // Close any existing popup
-                                if let Some(popup) = self.popup.take() {
-                                    popup.window.hide();
-                                }
+                                self.close_popup();
 
                                 // Create popup content first to get its height
                                 let content = match info.popup_type.as_str() {
@@ -458,7 +560,7 @@ impl App {
                                             PopupContent::Text(lines)
                                         } else {
                                             PopupContent::Text(vec![
-                                                "No command configured".to_string(),
+                                                "No command configured".to_string()
                                             ])
                                         }
                                     }
@@ -469,11 +571,58 @@ impl App {
                                     ]),
                                 };
 
+                                // Get border and color config for popup
+                                let (
+                                    border_color,
+                                    border_width,
+                                    popup_bg,
+                                    popup_text,
+                                    font_family,
+                                    font_size,
+                                ) = {
+                                    let config = self.config.read().unwrap();
+                                    let color = config
+                                        .bar
+                                        .border_color
+                                        .as_ref()
+                                        .and_then(|c| crate::config::parse_hex_color(c));
+                                    let popup_bg = config
+                                        .bar
+                                        .popup_background_color
+                                        .clone()
+                                        .unwrap_or_else(|| config.bar.background_color.clone());
+                                    let popup_text = config
+                                        .bar
+                                        .popup_text_color
+                                        .clone()
+                                        .unwrap_or_else(|| config.bar.text_color.clone());
+                                    (
+                                        color,
+                                        config.bar.border_width,
+                                        popup_bg,
+                                        popup_text,
+                                        config.bar.font_family.clone(),
+                                        config.bar.font_size,
+                                    )
+                                };
+
+                                // Top extension to overlap with bar and cover the border
+                                let top_extension = 4.0;
+
                                 // Create popup view and get its content height
-                                let (popup_view, content_height) = PopupView::new(mtm, content);
+                                let (popup_view, content_height) = PopupView::new(
+                                    mtm,
+                                    content,
+                                    border_color,
+                                    border_width,
+                                    top_extension,
+                                    &popup_bg,
+                                    &popup_text,
+                                    &font_family,
+                                    font_size,
+                                );
 
                                 // Calculate available space (from bar bottom to screen bottom)
-                                // bar_y is the y position of the bar, which equals the available space
                                 let available_space = self.bar_y;
                                 let max_height =
                                     available_space * (info.max_height_percent / 100.0);
@@ -505,6 +654,21 @@ impl App {
 
                                 popup_window.show_at(popup_x, self.bar_y);
 
+                                // Set popup gap on the bar - gap should match where popup's border is
+                                // Popup border is inset by border_width/2, so adjust gap accordingly
+                                let popup_left = popup_x - popup_width / 2.0;
+                                let popup_right = popup_x + popup_width / 2.0;
+                                let gap_left =
+                                    popup_left - window_frame.origin.x + border_width / 2.0;
+                                let gap_right =
+                                    popup_right - window_frame.origin.x - border_width / 2.0;
+                                let popup_frame = popup_window.window().frame();
+                                let popup_height = popup_frame.size.height;
+                                crate::view::set_popup_gap(
+                                    &self.windows[idx].window,
+                                    Some((gap_left, gap_right, popup_height)),
+                                );
+
                                 // Make the view first responder to receive scroll events
                                 popup_window.window().makeFirstResponder(Some(&*popup_view));
 
@@ -512,48 +676,52 @@ impl App {
                                     window: popup_window,
                                     _view: popup_view,
                                     module_x: info.module_x,
+                                    bar_window_idx: idx,
                                 });
                             }
                         } else if self.popup.is_some() {
                             // Clicked on bar but not on a module with popup - close popup
-                            if let Some(popup) = self.popup.take() {
-                                popup.window.hide();
-                            }
+                            self.close_popup();
                         }
                     }
                 }
-            } else if (last_mouse_buttons & 1) != 0 && (current_buttons & 1) == 0 {
-                // Clicked outside bar windows - check if inside popup/panel before closing
-                let mouse_loc = NSEvent::mouseLocation();
+            }
+            // Detect click outside bar to close popup/panel (via polling)
+            if current_hover.is_none() {
+                let left_released = (last_mouse_buttons & 1) != 0 && (current_buttons & 1) == 0;
+                if left_released {
+                    let mouse_loc = NSEvent::mouseLocation();
 
-                // Check if click is inside popup
-                let in_popup = self.popup.as_ref().map_or(false, |p| {
-                    let frame = p.window.window().frame();
-                    mouse_loc.x >= frame.origin.x
-                        && mouse_loc.x <= frame.origin.x + frame.size.width
-                        && mouse_loc.y >= frame.origin.y
-                        && mouse_loc.y <= frame.origin.y + frame.size.height
-                });
+                    // Check if click is inside popup
+                    let in_popup = self.popup.as_ref().map_or(false, |p| {
+                        let frame = p.window.window().frame();
+                        mouse_loc.x >= frame.origin.x
+                            && mouse_loc.x <= frame.origin.x + frame.size.width
+                            && mouse_loc.y >= frame.origin.y
+                            && mouse_loc.y <= frame.origin.y + frame.size.height
+                    });
 
-                // Check if click is inside panel
-                let in_panel = self.panel.as_ref().map_or(false, |p| {
-                    if !p.is_visible() {
-                        return false;
-                    }
-                    let frame = p.window().frame();
-                    mouse_loc.x >= frame.origin.x
-                        && mouse_loc.x <= frame.origin.x + frame.size.width
-                        && mouse_loc.y >= frame.origin.y
-                        && mouse_loc.y <= frame.origin.y + frame.size.height
-                });
+                    // Check if click is inside panel
+                    let in_panel = self.panel.as_ref().map_or(false, |p| {
+                        if !p.is_visible() {
+                            return false;
+                        }
+                        let frame = p.window().frame();
+                        mouse_loc.x >= frame.origin.x
+                            && mouse_loc.x <= frame.origin.x + frame.size.width
+                            && mouse_loc.y >= frame.origin.y
+                            && mouse_loc.y <= frame.origin.y + frame.size.height
+                    });
 
-                // Only close if click is outside both popup and panel
-                if !in_popup && !in_panel {
-                    if let Some(popup) = self.popup.take() {
-                        popup.window.hide();
-                    }
-                    if let Some(ref mut panel) = self.panel {
-                        panel.hide();
+                    // Close if click was outside popup and panel
+                    if !in_popup && !in_panel {
+                        self.close_popup();
+                        if let Some(ref mut panel) = self.panel {
+                            if panel.is_visible() {
+                                panel.hide();
+                                crate::view::set_panel_visible(&self.windows, false);
+                            }
+                        }
                     }
                 }
             }

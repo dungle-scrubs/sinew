@@ -30,11 +30,15 @@ impl Battery {
             // Parse: "Now drawing from 'Battery Power'" or "'AC Power'"
             let charging = text.contains("AC Power") || text.contains("charging");
 
-            // Parse percentage like "95%"
+            // Parse percentage like "95%;" or "95%"
             let percentage = text
                 .split_whitespace()
-                .find(|s| s.ends_with('%'))
-                .and_then(|s| s.trim_end_matches('%').parse().ok())
+                .find(|s| s.contains('%'))
+                .and_then(|s| {
+                    s.trim_end_matches(|c: char| !c.is_ascii_digit())
+                        .parse()
+                        .ok()
+                })
                 .unwrap_or(0);
 
             (percentage, charging)

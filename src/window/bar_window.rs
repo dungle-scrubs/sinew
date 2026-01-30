@@ -50,9 +50,9 @@ fn prevent_window_activation(window: &NSWindow) {
     }
 }
 
-/// Window level 24 = NSMainMenuWindowLevel (below notifications).
-/// Combined with kCGSPreventsActivationTagBit, clicks don't steal focus.
-const STATUS_WINDOW_LEVEL: isize = 25;
+/// Window level -20 = kCGBackstopMenuLevel (same as SketchyBar default).
+/// This allows macOS menu bar (24) to appear above when triggered.
+const STATUS_WINDOW_LEVEL: isize = -20;
 
 // Custom NSWindow subclass that cannot become key window (prevents stealing focus)
 define_class!(
@@ -180,6 +180,10 @@ impl BarWindow {
         if let Some(view) = self.window.contentView() {
             view.setNeedsDisplay(true);
         }
+    }
+
+    pub fn set_level(&self, level: isize) {
+        self.window.setLevel(level);
     }
 }
 

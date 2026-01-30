@@ -29,3 +29,9 @@ position = "right"
 # location = "auto"           # or "New York", "London", etc.
 # update_interval = 600       # seconds (10 min default)
 # show_while_loading = true   # true = show "Loading...", false = hidden until loaded
+
+# Demo module - showcases all visual components
+# Click to open a full-width panel with component examples
+# [[modules.right.right]]
+# type = "demo"
+# popup = "demo"              # Opens the component demo panel

@@ -3,6 +3,7 @@ mod battery;
 mod clock;
 mod cpu;
 mod date;
+mod demo;
 mod disk;
 mod memory;
 mod network;
@@ -21,6 +22,7 @@ pub use battery::Battery;
 pub use clock::Clock;
 pub use cpu::Cpu;
 pub use date::Date;
+pub use demo::Demo;
 pub use disk::Disk;
 pub use memory::Memory;
 pub use network::Network;
@@ -651,6 +653,11 @@ pub fn create_module_from_config(
                 ctx.text_color,
             )))
         }
+        "demo" => Some(Box::new(Demo::new(
+            ctx.font_family,
+            ctx.font_size,
+            ctx.text_color,
+        ))),
         "separator" => {
             let sep_type = config.separator_type.as_deref().unwrap_or("space");
             let sep_width = config.separator_width.unwrap_or(8.0);

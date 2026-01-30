@@ -105,6 +105,7 @@ impl Component for Columns {
                 max_width: column_width,
                 font_family: ctx.font_family,
                 font_size: ctx.font_size,
+                theme: ctx.theme,
             };
 
             // Measure all children in this column and sum their heights
@@ -148,6 +149,7 @@ impl Component for Columns {
                     max_width: column_width,
                     font_family: ctx.font_family,
                     font_size: ctx.font_size,
+                    theme: ctx.theme,
                 };
                 let child_size = child.measure(&measure_ctx);
 
@@ -160,6 +162,7 @@ impl Component for Columns {
                     font_family: ctx.font_family,
                     font_size: ctx.font_size,
                     text_color: ctx.text_color,
+                    theme: ctx.theme,
                 };
                 child.draw(&mut child_ctx);
 

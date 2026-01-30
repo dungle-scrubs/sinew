@@ -103,6 +103,7 @@ impl Component for BoxComponent {
                 max_width: child_max_width,
                 font_family: ctx.font_family,
                 font_size: ctx.font_size,
+                theme: ctx.theme,
             };
             child.measure(&child_ctx)
         } else {
@@ -186,6 +187,7 @@ impl Component for BoxComponent {
                 max_width: ctx.width - self.padding * 2.0,
                 font_family: ctx.font_family,
                 font_size: ctx.font_size,
+                theme: ctx.theme,
             };
             let child_size = child.measure(&child_ctx);
 
@@ -198,6 +200,7 @@ impl Component for BoxComponent {
                 font_family: ctx.font_family,
                 font_size: ctx.font_size,
                 text_color: ctx.text_color,
+                theme: ctx.theme,
             };
             child.draw(&mut child_draw_ctx);
         }

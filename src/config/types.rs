@@ -68,6 +68,36 @@ pub struct ModuleConfig {
     pub margin_left: Option<f64>,
     /// Right margin
     pub margin_right: Option<f64>,
+    /// Separator type: "space", "line", "dot", "icon"
+    pub separator_type: Option<String>,
+    /// Separator width/radius
+    pub separator_width: Option<f64>,
+    /// Separator color
+    pub separator_color: Option<String>,
+    /// Path for disk module
+    pub path: Option<String>,
+    /// Max text length for app_name, now_playing modules
+    pub max_length: Option<f64>,
+    /// Internal padding for modules with backgrounds
+    pub padding: Option<f64>,
+    /// Command for script module
+    pub command: Option<String>,
+    /// Update interval in seconds for script module
+    pub interval: Option<f64>,
+    /// Command to run when module is clicked
+    pub click_command: Option<String>,
+    /// Command to run when module is right-clicked
+    pub right_click_command: Option<String>,
+    /// Group ID for shared backgrounds
+    pub group: Option<String>,
+    /// Color when value is critical (e.g., battery < 20%)
+    pub critical_color: Option<String>,
+    /// Color when value is warning (e.g., battery < 40%)
+    pub warning_color: Option<String>,
+    /// Threshold for critical state (percentage)
+    pub critical_threshold: Option<f64>,
+    /// Threshold for warning state (percentage)
+    pub warning_threshold: Option<f64>,
 }
 
 impl Default for Config {

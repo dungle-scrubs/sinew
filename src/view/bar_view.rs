@@ -10,7 +10,7 @@ use objc2_app_kit::{
 use objc2_foundation::{NSPoint, NSRect};
 
 use crate::config::{parse_hex_color, SharedConfig};
-use crate::modules::{create_module_from_config, Alignment, Clock, ModuleWidth, MouseEvent, PositionedModule, RenderContext, Zone};
+use crate::modules::{create_module_from_config, Alignment, Clock, ModuleStyle, ModuleWidth, MouseEvent, PositionedModule, RenderContext, Zone};
 use crate::window::WindowPosition;
 
 thread_local! {
@@ -61,6 +61,7 @@ define_class!(
     impl BarView {
         #[unsafe(method(drawRect:))]
         fn draw_rect(&self, _dirty_rect: NSRect) {
+            log::trace!("drawRect called");
             let view_id = self as *const _ as usize;
             VIEW_STATES.with(|states| {
                 if let Some(state) = states.borrow_mut().get_mut(&view_id) {
@@ -81,18 +82,87 @@ define_class!(
 
         #[unsafe(method(acceptsFirstResponder))]
         fn accepts_first_responder(&self) -> bool {
-            false
+            true
         }
 
         #[unsafe(method(mouseDown:))]
         fn mouse_down(&self, _event: &NSEvent) {
+            log::debug!("Mouse down");
             // Swallow the click - do nothing, don't propagate
             // This prevents focus stealing since we don't call super
         }
 
         #[unsafe(method(mouseUp:))]
-        fn mouse_up(&self, _event: &NSEvent) {
+        fn mouse_up(&self, event: &NSEvent) {
+            let location = event.locationInWindow();
+            let local = self.convert_point_from_view(location, None);
+
+            let view_id = self as *const _ as usize;
+            let mut click_command: Option<String> = None;
+
+            VIEW_STATES.with(|states| {
+                if let Some(state) = states.borrow().get(&view_id) {
+                    if let Some(cache) = &state.cache {
+                        for positioned in &cache.modules {
+                            if positioned.contains_point(local.x) {
+                                if let Some(ref cmd) = positioned.click_command {
+                                    click_command = Some(cmd.clone());
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+            });
+
+            // Execute click command if one was found
+            if let Some(cmd) = click_command {
+                log::info!("Executing click command: {}", cmd);
+                std::thread::spawn(move || {
+                    let _ = std::process::Command::new("sh")
+                        .args(["-c", &cmd])
+                        .spawn();
+                });
+            }
+        }
+
+        #[unsafe(method(rightMouseDown:))]
+        fn right_mouse_down(&self, _event: &NSEvent) {
+            log::debug!("Right mouse down");
             // Swallow - don't propagate
+        }
+
+        #[unsafe(method(rightMouseUp:))]
+        fn right_mouse_up(&self, event: &NSEvent) {
+            let location = event.locationInWindow();
+            let local = self.convert_point_from_view(location, None);
+
+            let view_id = self as *const _ as usize;
+            let mut click_command: Option<String> = None;
+
+            VIEW_STATES.with(|states| {
+                if let Some(state) = states.borrow().get(&view_id) {
+                    if let Some(cache) = &state.cache {
+                        for positioned in &cache.modules {
+                            if positioned.contains_point(local.x) {
+                                if let Some(ref cmd) = positioned.right_click_command {
+                                    click_command = Some(cmd.clone());
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+            });
+
+            // Execute right-click command if one was found
+            if let Some(cmd) = click_command {
+                std::thread::spawn(move || {
+                    let _ = std::process::Command::new("sh")
+                        .args(["-c", &cmd])
+                        .spawn();
+                });
+            }
         }
 
         #[unsafe(method(mouseMoved:))]
@@ -119,12 +189,8 @@ define_class!(
                 }
             });
 
-            // Update cursor based on whether we're over a clickable item
-            if over_clickable {
-                NSCursor::pointingHandCursor().set();
-            } else {
-                NSCursor::arrowCursor().set();
-            }
+            // NOTE: Cursor handling removed - causes global flickering with Accessory apps
+            let _ = over_clickable;
 
             self.setNeedsDisplay(true);
         }
@@ -150,13 +216,12 @@ define_class!(
                     state.is_pressed = false;
                 }
             });
-            // Reset cursor when leaving the bar
-            NSCursor::arrowCursor().set();
             self.setNeedsDisplay(true);
         }
 
         #[unsafe(method(updateTrackingAreas))]
         fn update_tracking_areas(&self) {
+            log::debug!("updateTrackingAreas called, bounds: {:?}", self.bounds());
             // Remove old tracking areas
             for area in self.trackingAreas().iter() {
                 self.removeTrackingArea(&area);
@@ -165,7 +230,9 @@ define_class!(
             // Add new tracking area for the entire view
             let options = NSTrackingAreaOptions::MouseEnteredAndExited
                 | NSTrackingAreaOptions::MouseMoved
-                | NSTrackingAreaOptions::ActiveAlways;
+                | NSTrackingAreaOptions::ActiveAlways
+                | NSTrackingAreaOptions::InVisibleRect
+                | NSTrackingAreaOptions::CursorUpdate;
 
             let tracking_area = unsafe {
                 use objc2::AllocAnyThread;
@@ -268,6 +335,10 @@ impl BarView {
                             created.flex,
                             created.min_width,
                             created.max_width,
+                            created.style,
+                            created.click_command,
+                            created.right_click_command,
+                            created.group,
                         ))
                     }).collect()
                 };
@@ -501,12 +572,110 @@ impl BarView {
             }
         }
 
+        // Helper to draw rounded rectangle
+        fn draw_rounded_rect(ctx: &mut core_graphics::context::CGContext, x: f64, y: f64, w: f64, h: f64, r: f64, fill: bool) {
+            if r <= 0.0 {
+                let rect = core_graphics::geometry::CGRect::new(
+                    &core_graphics::geometry::CGPoint::new(x, y),
+                    &core_graphics::geometry::CGSize::new(w, h),
+                );
+                if fill {
+                    ctx.fill_rect(rect);
+                } else {
+                    ctx.stroke_rect(rect);
+                }
+                return;
+            }
+
+            // Clamp radius to half of min dimension
+            let r = r.min(w / 2.0).min(h / 2.0);
+
+            ctx.begin_path();
+            ctx.move_to_point(x + r, y);
+            ctx.add_line_to_point(x + w - r, y);
+            ctx.add_curve_to_point(x + w, y, x + w, y, x + w, y + r);
+            ctx.add_line_to_point(x + w, y + h - r);
+            ctx.add_curve_to_point(x + w, y + h, x + w, y + h, x + w - r, y + h);
+            ctx.add_line_to_point(x + r, y + h);
+            ctx.add_curve_to_point(x, y + h, x, y + h, x, y + h - r);
+            ctx.add_line_to_point(x, y + r);
+            ctx.add_curve_to_point(x, y, x, y, x + r, y);
+            ctx.close_path();
+
+            if fill {
+                ctx.fill_path();
+            } else {
+                ctx.stroke_path();
+            }
+        }
+
+        // First pass: collect group bounds
+        let mut group_bounds: std::collections::HashMap<String, (f64, f64, f64, f64, (f64, f64, f64, f64), f64)> = std::collections::HashMap::new();
+        for positioned in &cache.modules {
+            if let Some(ref group) = positioned.group {
+                if let Some(bg) = positioned.style.background {
+                    let padding = positioned.style.padding;
+                    let entry = group_bounds.entry(group.clone()).or_insert((
+                        f64::MAX, // min_x
+                        0.0,      // max_x
+                        positioned.style.corner_radius,
+                        padding,
+                        bg,
+                        positioned.style.border_width,
+                    ));
+                    entry.0 = entry.0.min(positioned.x - padding);
+                    entry.1 = entry.1.max(positioned.x + positioned.width + padding);
+                }
+            }
+        }
+
+        // Draw group backgrounds
+        for (_group_id, (min_x, max_x, radius, _padding, bg, _border_width)) in &group_bounds {
+            let (r, g, b, a) = *bg;
+            ctx.set_rgb_fill_color(r, g, b, a);
+            draw_rounded_rect(&mut ctx, *min_x, 2.0, max_x - min_x, bar_height - 4.0, *radius, true);
+        }
+
         // Draw modules
         for positioned in &cache.modules {
             let module_bounds = (positioned.x, 0.0, positioned.width, bar_height);
             let is_module_hovering = state.mouse_position.map_or(false, |p| {
                 positioned.contains_point(p.x)
             });
+
+            // Skip individual background if part of a group
+            let in_group = positioned.group.is_some() && group_bounds.contains_key(positioned.group.as_ref().unwrap());
+
+            // Draw module background if configured and not in a group
+            if !in_group && (positioned.style.background.is_some() || positioned.style.border_color.is_some()) {
+                let padding = positioned.style.padding;
+                let bg_x = positioned.x - padding;
+                let bg_y = 2.0;
+                let bg_width = positioned.width + padding * 2.0;
+                let bg_height = bar_height - 4.0;
+                let radius = positioned.style.corner_radius;
+
+                // Draw background
+                if let Some((r, g, b, a)) = positioned.style.background {
+                    // Lighten on hover
+                    let (r, g, b) = if is_module_hovering {
+                        ((r + 0.1).min(1.0), (g + 0.1).min(1.0), (b + 0.1).min(1.0))
+                    } else {
+                        (r, g, b)
+                    };
+
+                    ctx.set_rgb_fill_color(r, g, b, a);
+                    draw_rounded_rect(&mut ctx, bg_x, bg_y, bg_width, bg_height, radius, true);
+                }
+
+                // Draw border
+                if let Some((r, g, b, a)) = positioned.style.border_color {
+                    let border_width = positioned.style.border_width.max(1.0);
+                    ctx.set_rgb_stroke_color(r, g, b, a);
+                    ctx.set_line_width(border_width);
+                    draw_rounded_rect(&mut ctx, bg_x, bg_y, bg_width, bg_height, radius, false);
+                }
+            }
 
             let mut render_ctx = RenderContext {
                 ctx: &mut ctx,
@@ -534,5 +703,86 @@ pub fn set_hover_state(window: &objc2_app_kit::NSWindow, is_hovering: bool) {
             }
         });
         view.setNeedsDisplay(true);
+    }
+}
+
+/// Handle mouse events from the global mouse monitor
+pub fn handle_mouse_event(
+    view_id: usize,
+    event: crate::window::MouseEventKind,
+    x: f64,
+    y: f64,
+    _config: &crate::config::SharedConfig,
+) {
+    use crate::window::MouseEventKind;
+
+    // Get click/right-click command for the module at this position
+    let mut click_command: Option<String> = None;
+    let mut right_click_command: Option<String> = None;
+    let mut is_over_module = false;
+
+    VIEW_STATES.with(|states| {
+        if let Some(state) = states.borrow_mut().get_mut(&view_id) {
+            // Update mouse position
+            state.mouse_position = Some(NSPoint::new(x, y));
+
+            // Handle hover state changes
+            match event {
+                MouseEventKind::Entered => {
+                    state.is_hovering = true;
+                }
+                MouseEventKind::Exited => {
+                    state.is_hovering = false;
+                    state.mouse_position = None;
+                }
+                _ => {}
+            }
+
+            // Check if over a clickable module and get commands
+            if let Some(cache) = &state.cache {
+                for positioned in &cache.modules {
+                    if positioned.contains_point(x) {
+                        is_over_module = true;
+                        if let Some(ref cmd) = positioned.click_command {
+                            click_command = Some(cmd.clone());
+                        }
+                        if let Some(ref cmd) = positioned.right_click_command {
+                            right_click_command = Some(cmd.clone());
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+    });
+
+    // NOTE: Cursor handling disabled - it was affecting the system cursor globally
+    // and causing flickering. For an Accessory app, cursor changes don't work well.
+    // The bar is still fully interactive without cursor changes.
+    let _ = is_over_module; // Suppress unused warning
+
+    // Execute commands on click
+    match event {
+        MouseEventKind::LeftUp => {
+            if let Some(cmd) = click_command {
+                log::info!("Executing click command: {}", cmd);
+                std::thread::spawn(move || {
+                    let _ = std::process::Command::new("sh")
+                        .args(["-c", &cmd])
+                        .spawn();
+                });
+            }
+        }
+        MouseEventKind::RightUp => {
+            if let Some(cmd) = right_click_command {
+                log::info!("Executing right-click command: {}", cmd);
+                std::thread::spawn(move || {
+                    let _ = std::process::Command::new("sh")
+                        .args(["-c", &cmd])
+                        .spawn();
+                });
+            }
+        }
+        _ => {}
     }
 }

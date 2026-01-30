@@ -1,8 +1,8 @@
 //! Popup view for rendering popup panel content
 
 use objc2::rc::Retained;
-use objc2::{define_class, msg_send, MainThreadMarker, MainThreadOnly};
-use objc2_app_kit::{NSColor, NSGraphicsContext, NSRectFill, NSView};
+use objc2::{MainThreadMarker, MainThreadOnly, define_class, msg_send};
+use objc2_app_kit::{NSColor, NSEvent, NSGraphicsContext, NSRectFill, NSView};
 use objc2_foundation::NSRect;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -18,6 +18,8 @@ struct PopupState {
     graphics: Graphics,
     bg_color: (f64, f64, f64, f64),
     text_color: (f64, f64, f64, f64),
+    scroll_offset: f64,
+    content_height: f64,
 }
 
 #[derive(Clone)]
@@ -58,6 +60,26 @@ define_class!(
         fn is_flipped(&self) -> bool {
             true // Use top-left origin for easier text layout
         }
+
+        #[unsafe(method(acceptsFirstResponder))]
+        fn accepts_first_responder(&self) -> bool {
+            true // Accept scroll events
+        }
+
+        #[unsafe(method(scrollWheel:))]
+        fn scroll_wheel(&self, event: &NSEvent) {
+            let view_id = self as *const _ as usize;
+            let delta_y = event.scrollingDeltaY();
+
+            POPUP_STATES.with(|states| {
+                if let Some(state) = states.borrow_mut().get_mut(&view_id) {
+                    let bounds = self.bounds();
+                    let max_scroll = (state.content_height - bounds.size.height).max(0.0);
+                    state.scroll_offset = (state.scroll_offset - delta_y).clamp(0.0, max_scroll);
+                }
+            });
+            self.setNeedsDisplay(true);
+        }
     }
 );
 
@@ -68,17 +90,28 @@ impl PopupView {
         let view_id = &*view as *const _ as usize;
 
         let graphics = Graphics::new(
-            "#1a1b26",  // bg_color
-            "#c8cdd5",  // text_color
-            "SF Pro",   // font_family
-            13.0,       // font_size
+            "#1a1b26", // bg_color
+            "#c8cdd5", // text_color
+            "SF Pro",  // font_family
+            13.0,      // font_size
         );
+
+        let padding = 12.0;
+        let line_height = 20.0;
+        let content_height = match &content {
+            PopupContent::Text(lines) => padding * 2.0 + (lines.len() as f64) * line_height,
+            PopupContent::Info(pairs) => padding * 2.0 + (pairs.len() as f64) * line_height,
+            PopupContent::Calendar { .. } => 200.0, // Fixed height for calendar
+            PopupContent::Loading => 50.0,
+        };
 
         let state = PopupState {
             content,
             graphics,
             bg_color: (0.118, 0.118, 0.180, 1.0), // #1e1e2e - matches bar background
             text_color: (0.78, 0.8, 0.84, 1.0),
+            scroll_offset: 0.0,
+            content_height,
         };
 
         POPUP_STATES.with(|states| {
@@ -101,7 +134,7 @@ impl PopupView {
     fn draw_content(&self, state: &PopupState) {
         let bounds = self.bounds();
 
-        // Draw background with rounded corners
+        // Draw background
         let (r, g, b, a) = state.bg_color;
         let bg_color = NSColor::colorWithSRGBRed_green_blue_alpha(r, g, b, a);
         bg_color.set();
@@ -122,11 +155,25 @@ impl PopupView {
         let padding = 12.0;
         let line_height = 20.0;
 
+        // Save state and apply clipping for scrollable content
+        ctx.save();
+        let clip_rect = core_graphics::geometry::CGRect::new(
+            &core_graphics::geometry::CGPoint::new(0.0, 0.0),
+            &core_graphics::geometry::CGSize::new(bounds.size.width, bounds.size.height),
+        );
+        ctx.clip_to_rect(clip_rect);
+
+        // Apply scroll offset
+        let scroll_offset = state.scroll_offset;
+
         match &state.content {
             PopupContent::Text(lines) => {
-                let mut y = padding;
+                let mut y = padding - scroll_offset;
                 for line in lines {
-                    state.graphics.draw_text_flipped(&mut ctx, line, padding, y);
+                    // Only draw if visible
+                    if y + line_height > 0.0 && y < bounds.size.height {
+                        state.graphics.draw_text_flipped(&mut ctx, line, padding, y);
+                    }
                     y += line_height;
                 }
             }
@@ -134,42 +181,101 @@ impl PopupView {
                 self.draw_calendar(&mut ctx, &state.graphics, bounds, *year, *month, padding);
             }
             PopupContent::Info(pairs) => {
-                let mut y = padding;
+                let mut y = padding - scroll_offset;
                 let label_width = 100.0;
                 for (label, value) in pairs {
-                    // Draw label
-                    state.graphics.draw_text_flipped(&mut ctx, label, padding, y);
-                    // Draw value
-                    state.graphics.draw_text_flipped(&mut ctx, value, padding + label_width + 8.0, y);
+                    if y + line_height > 0.0 && y < bounds.size.height {
+                        state
+                            .graphics
+                            .draw_text_flipped(&mut ctx, label, padding, y);
+                        state.graphics.draw_text_flipped(
+                            &mut ctx,
+                            value,
+                            padding + label_width + 8.0,
+                            y,
+                        );
+                    }
                     y += line_height;
                 }
             }
             PopupContent::Loading => {
-                state.graphics.draw_text_flipped(&mut ctx, "Loading...", padding, padding);
+                state
+                    .graphics
+                    .draw_text_flipped(&mut ctx, "Loading...", padding, padding);
             }
         }
 
+        ctx.restore();
+
+        // Draw scroll indicator if content is scrollable
+        self.draw_scroll_indicator(&mut ctx, bounds, state);
+
         std::mem::forget(ctx);
+    }
+
+    fn draw_scroll_indicator(
+        &self,
+        ctx: &mut core_graphics::context::CGContext,
+        bounds: NSRect,
+        state: &PopupState,
+    ) {
+        let view_height = bounds.size.height;
+        let content_height = state.content_height;
+
+        if content_height <= view_height {
+            return; // No scrolling needed
+        }
+
+        let indicator_height = (view_height / content_height * view_height).max(20.0);
+        let max_scroll = content_height - view_height;
+        let scroll_ratio = state.scroll_offset / max_scroll;
+        let indicator_y = scroll_ratio * (view_height - indicator_height);
+
+        // Draw scroll track (subtle)
+        ctx.set_rgb_fill_color(0.3, 0.3, 0.35, 0.3);
+        let track_rect = core_graphics::geometry::CGRect::new(
+            &core_graphics::geometry::CGPoint::new(bounds.size.width - 6.0, 2.0),
+            &core_graphics::geometry::CGSize::new(4.0, view_height - 4.0),
+        );
+        ctx.fill_rect(track_rect);
+
+        // Draw scroll indicator
+        ctx.set_rgb_fill_color(0.5, 0.5, 0.55, 0.8);
+        let indicator_rect = core_graphics::geometry::CGRect::new(
+            &core_graphics::geometry::CGPoint::new(bounds.size.width - 6.0, indicator_y + 2.0),
+            &core_graphics::geometry::CGSize::new(4.0, indicator_height - 4.0),
+        );
+        ctx.fill_rect(indicator_rect);
     }
 
     fn draw_calendar(
         &self,
         ctx: &mut core_graphics::context::CGContext,
         graphics: &Graphics,
-        bounds: NSRect,
+        _bounds: NSRect,
         year: i32,
         month: u32,
         padding: f64,
     ) {
-        use chrono::{Datelike, NaiveDate, Weekday};
+        use chrono::{Datelike, NaiveDate};
 
         let cell_size = 28.0;
         let header_height = 30.0;
 
         // Draw month/year header
         let month_names = [
-            "January", "February", "March", "April", "May", "June",
-            "July", "August", "September", "October", "November", "December",
+            "January",
+            "February",
+            "March",
+            "April",
+            "May",
+            "June",
+            "July",
+            "August",
+            "September",
+            "October",
+            "November",
+            "December",
         ];
         let header = format!("{} {}", month_names[(month - 1) as usize], year);
         graphics.draw_text_flipped(ctx, &header, padding, padding);

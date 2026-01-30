@@ -1,15 +1,18 @@
 use std::sync::{Arc, RwLock};
 
-use objc2::rc::Retained;
 use objc2::MainThreadMarker;
+use objc2::rc::Retained;
 use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy, NSEvent};
 use objc2_foundation::NSDate;
 
-use crate::config::{load_config, ConfigWatcher, SharedConfig};
+use crate::config::{ConfigWatcher, SharedConfig, load_config};
 use chrono::Datelike;
 
-use crate::view::{bump_config_version, BarView, PanelContent, PanelView, PopupContent, PopupView};
-use crate::window::{get_main_screen_info, BarWindow, MouseEventKind, MouseMonitor, Panel, PopupWindow, WindowBounds, WindowPosition};
+use crate::view::{BarView, PanelContent, PanelView, PopupContent, PopupView, bump_config_version};
+use crate::window::{
+    BarWindow, MouseEventKind, MouseMonitor, Panel, PopupWindow, WindowBounds, WindowPosition,
+    get_main_screen_info,
+};
 
 pub struct App {
     _app: Retained<NSApplication>,
@@ -80,7 +83,12 @@ impl App {
     fn create_windows(
         mtm: MainThreadMarker,
         config: &SharedConfig,
-    ) -> (Vec<BarWindow>, Vec<Retained<BarView>>, Option<MouseMonitor>, Option<(f64, f64)>) {
+    ) -> (
+        Vec<BarWindow>,
+        Vec<Retained<BarView>>,
+        Option<MouseMonitor>,
+        Option<(f64, f64)>,
+    ) {
         let mut windows = Vec::new();
         let mut views = Vec::new();
         let mut window_bounds = Vec::new();
@@ -171,15 +179,17 @@ impl App {
             let view_ids: Vec<usize> = views.iter().map(|v| &**v as *const _ as usize).collect();
             let config_clone = config.clone();
 
-            let callback = Arc::new(move |event: MouseEventKind, window_idx: usize, x: f64, y: f64| {
-                // Get the view ID for this window
-                if window_idx >= view_ids.len() {
-                    return;
-                }
-                let view_id = view_ids[window_idx];
+            let callback = Arc::new(
+                move |event: MouseEventKind, window_idx: usize, x: f64, y: f64| {
+                    // Get the view ID for this window
+                    if window_idx >= view_ids.len() {
+                        return;
+                    }
+                    let view_id = view_ids[window_idx];
 
-                crate::view::handle_mouse_event(view_id, event, x, y, &config_clone);
-            });
+                    crate::view::handle_mouse_event(view_id, event, x, y, &config_clone);
+                },
+            );
 
             MouseMonitor::new(window_bounds, callback)
         } else {
@@ -371,17 +381,16 @@ impl App {
                                         panel_height,
                                     );
 
-                                    // Create panel content (calendar by default)
-                                    let now = chrono::Local::now();
-                                    let panel_view = PanelView::new(
-                                        mtm,
-                                        PanelContent::Calendar {
-                                            year: now.year(),
-                                            month: now.month(),
-                                        },
-                                    );
+                                    // Create panel content with scrollable text for testing
+                                    let test_lines: Vec<String> = (1..=50)
+                                        .map(|i| format!("Line {}: This is scrollable content in the full-width panel. Scroll with your trackpad or mouse wheel.", i))
+                                        .collect();
+                                    let panel_view =
+                                        PanelView::new(mtm, PanelContent::Text(test_lines));
                                     panel.set_content_view(&panel_view);
                                     panel.show();
+                                    // Make the view first responder to receive scroll events
+                                    panel.make_first_responder(&panel_view);
 
                                     self.panel = Some(panel);
                                     self.panel_view = Some(panel_view);
@@ -397,9 +406,10 @@ impl App {
                             }
 
                             // Check if clicking same module that has popup open - toggle it
-                            let should_close = self.popup.as_ref().map_or(false, |p| {
-                                (p.module_x - info.module_x).abs() < 1.0
-                            });
+                            let should_close = self
+                                .popup
+                                .as_ref()
+                                .map_or(false, |p| (p.module_x - info.module_x).abs() < 1.0);
 
                             if should_close {
                                 // Close existing popup
@@ -414,7 +424,8 @@ impl App {
 
                                 // Create and show new popup
                                 let window_frame = self.windows[idx].window.frame();
-                                let popup_x = window_frame.origin.x + info.module_x + info.module_width / 2.0;
+                                let popup_x =
+                                    window_frame.origin.x + info.module_x + info.module_width / 2.0;
                                 let popup_y = window_frame.origin.y; // Below the bar
 
                                 let popup_window = PopupWindow::new(mtm, info.width, info.height);
@@ -433,20 +444,32 @@ impl App {
                                             let output = std::process::Command::new("sh")
                                                 .args(["-c", cmd])
                                                 .output()
-                                                .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
-                                                .unwrap_or_else(|_| "Error running command".to_string());
-                                            let lines: Vec<String> = output.lines().map(|s| s.to_string()).collect();
+                                                .map(|o| {
+                                                    String::from_utf8_lossy(&o.stdout).to_string()
+                                                })
+                                                .unwrap_or_else(|_| {
+                                                    "Error running command".to_string()
+                                                });
+                                            let lines: Vec<String> =
+                                                output.lines().map(|s| s.to_string()).collect();
                                             PopupContent::Text(lines)
                                         } else {
-                                            PopupContent::Text(vec!["No command configured".to_string()])
+                                            PopupContent::Text(vec![
+                                                "No command configured".to_string(),
+                                            ])
                                         }
                                     }
-                                    _ => PopupContent::Text(vec![format!("Popup type: {}", info.popup_type)]),
+                                    _ => PopupContent::Text(vec![format!(
+                                        "Popup type: {}",
+                                        info.popup_type
+                                    )]),
                                 };
 
                                 let popup_view = PopupView::new(mtm, content);
                                 popup_window.window().setContentView(Some(&popup_view));
                                 popup_window.show_at(popup_x, popup_y);
+                                // Make the view first responder to receive scroll events
+                                popup_window.window().makeFirstResponder(Some(&*popup_view));
 
                                 self.popup = Some(ActivePopup {
                                     window: popup_window,
@@ -463,12 +486,38 @@ impl App {
                     }
                 }
             } else if (last_mouse_buttons & 1) != 0 && (current_buttons & 1) == 0 {
-                // Clicked outside bar windows - close popup and panel
-                if let Some(popup) = self.popup.take() {
-                    popup.window.hide();
-                }
-                if let Some(ref mut panel) = self.panel {
-                    panel.hide();
+                // Clicked outside bar windows - check if inside popup/panel before closing
+                let mouse_loc = NSEvent::mouseLocation();
+
+                // Check if click is inside popup
+                let in_popup = self.popup.as_ref().map_or(false, |p| {
+                    let frame = p.window.window().frame();
+                    mouse_loc.x >= frame.origin.x
+                        && mouse_loc.x <= frame.origin.x + frame.size.width
+                        && mouse_loc.y >= frame.origin.y
+                        && mouse_loc.y <= frame.origin.y + frame.size.height
+                });
+
+                // Check if click is inside panel
+                let in_panel = self.panel.as_ref().map_or(false, |p| {
+                    if !p.is_visible() {
+                        return false;
+                    }
+                    let frame = p.window().frame();
+                    mouse_loc.x >= frame.origin.x
+                        && mouse_loc.x <= frame.origin.x + frame.size.width
+                        && mouse_loc.y >= frame.origin.y
+                        && mouse_loc.y <= frame.origin.y + frame.size.height
+                });
+
+                // Only close if click is outside both popup and panel
+                if !in_popup && !in_panel {
+                    if let Some(popup) = self.popup.take() {
+                        popup.window.hide();
+                    }
+                    if let Some(ref mut panel) = self.panel {
+                        panel.hide();
+                    }
                 }
             }
             last_mouse_buttons = current_buttons;
@@ -476,6 +525,16 @@ impl App {
             // Trigger redraws
             for window in &self.windows {
                 window.set_needs_display();
+            }
+
+            // Also redraw popup and panel if visible
+            if let Some(ref popup) = self.popup {
+                popup.window.window().displayIfNeeded();
+            }
+            if let Some(ref panel) = self.panel {
+                if panel.is_visible() {
+                    panel.window().displayIfNeeded();
+                }
             }
         }
     }

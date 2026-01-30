@@ -1,8 +1,8 @@
 //! Panel view for full-width slide-down panels
 
 use objc2::rc::Retained;
-use objc2::{define_class, msg_send, MainThreadMarker, MainThreadOnly};
-use objc2_app_kit::{NSColor, NSGraphicsContext, NSRectFill, NSView};
+use objc2::{MainThreadMarker, MainThreadOnly, define_class, msg_send};
+use objc2_app_kit::{NSColor, NSEvent, NSGraphicsContext, NSRectFill, NSView};
 use objc2_foundation::{NSPoint, NSRect, NSSize};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -16,19 +16,20 @@ thread_local! {
 struct PanelState {
     content: PanelContent,
     graphics: Graphics,
+    scroll_offset: f64,
+    content_height: f64,
 }
 
 #[derive(Clone)]
 pub enum PanelContent {
     /// Calendar with navigation
-    Calendar {
-        year: i32,
-        month: u32,
-    },
+    Calendar { year: i32, month: u32 },
     /// System info grid
     SystemInfo,
     /// Custom content with sections
     Sections(Vec<PanelSection>),
+    /// Scrollable text content
+    Text(Vec<String>),
 }
 
 #[derive(Clone)]
@@ -70,6 +71,26 @@ define_class!(
         fn is_flipped(&self) -> bool {
             true
         }
+
+        #[unsafe(method(acceptsFirstResponder))]
+        fn accepts_first_responder(&self) -> bool {
+            true // Accept scroll events
+        }
+
+        #[unsafe(method(scrollWheel:))]
+        fn scroll_wheel(&self, event: &NSEvent) {
+            let view_id = self as *const _ as usize;
+            let delta_y = event.scrollingDeltaY();
+
+            PANEL_STATES.with(|states| {
+                if let Some(state) = states.borrow_mut().get_mut(&view_id) {
+                    let bounds = self.bounds();
+                    let max_scroll = (state.content_height - bounds.size.height).max(0.0);
+                    state.scroll_offset = (state.scroll_offset - delta_y).clamp(0.0, max_scroll);
+                }
+            });
+            self.setNeedsDisplay(true);
+        }
     }
 );
 
@@ -79,14 +100,31 @@ impl PanelView {
 
         let view_id = &*view as *const _ as usize;
 
-        let graphics = Graphics::new(
-            "#1a1b26",
-            "#c8cdd5",
-            "SF Pro",
-            14.0,
-        );
+        let graphics = Graphics::new("#1a1b26", "#c8cdd5", "SF Pro", 14.0);
 
-        let state = PanelState { content, graphics };
+        let line_height = 22.0;
+        let padding = 20.0;
+        let content_height = match &content {
+            PanelContent::Text(lines) => padding * 2.0 + (lines.len() as f64) * line_height,
+            PanelContent::Calendar { .. } => 300.0, // Fixed height
+            PanelContent::SystemInfo => 200.0,
+            PanelContent::Sections(sections) => {
+                let mut h = padding;
+                for section in sections {
+                    h += 30.0; // Section title
+                    h += (section.items.len() as f64) * 24.0;
+                    h += 15.0; // Section spacing
+                }
+                h + padding
+            }
+        };
+
+        let state = PanelState {
+            content,
+            graphics,
+            scroll_offset: 0.0,
+            content_height,
+        };
 
         PANEL_STATES.with(|states| {
             states.borrow_mut().insert(view_id, state);
@@ -134,6 +172,16 @@ impl PanelView {
         let mut ctx =
             unsafe { core_graphics::context::CGContext::from_existing_context_ptr(cg_context_ptr) };
 
+        // Save state and apply clipping for scrollable content
+        ctx.save();
+        let clip_rect = core_graphics::geometry::CGRect::new(
+            &core_graphics::geometry::CGPoint::new(0.0, 0.0),
+            &core_graphics::geometry::CGSize::new(bounds.size.width, bounds.size.height),
+        );
+        ctx.clip_to_rect(clip_rect);
+
+        let scroll_offset = state.scroll_offset;
+
         match &state.content {
             PanelContent::Calendar { year, month } => {
                 self.draw_calendar(&mut ctx, &state.graphics, bounds, *year, *month);
@@ -144,9 +192,58 @@ impl PanelView {
             PanelContent::Sections(sections) => {
                 self.draw_sections(&mut ctx, &state.graphics, bounds, sections);
             }
+            PanelContent::Text(lines) => {
+                let padding = 20.0;
+                let line_height = 22.0;
+                let mut y = padding - scroll_offset;
+                for line in lines {
+                    if y + line_height > 0.0 && y < bounds.size.height {
+                        state.graphics.draw_text_flipped(&mut ctx, line, padding, y);
+                    }
+                    y += line_height;
+                }
+                // Draw scroll indicator
+                self.draw_scroll_indicator(&mut ctx, bounds, state);
+            }
         }
 
+        ctx.restore();
         std::mem::forget(ctx);
+    }
+
+    fn draw_scroll_indicator(
+        &self,
+        ctx: &mut core_graphics::context::CGContext,
+        bounds: NSRect,
+        state: &PanelState,
+    ) {
+        let view_height = bounds.size.height;
+        let content_height = state.content_height;
+
+        if content_height <= view_height {
+            return;
+        }
+
+        let indicator_height = (view_height / content_height * view_height).max(20.0);
+        let max_scroll = content_height - view_height;
+        let scroll_ratio = state.scroll_offset / max_scroll;
+        let indicator_y = scroll_ratio * (view_height - indicator_height);
+
+        // Draw scroll track
+        ctx.set_rgb_fill_color(0.3, 0.3, 0.35, 0.3);
+        let track_rect = core_graphics::geometry::CGRect::new(
+            &core_graphics::geometry::CGPoint::new(bounds.size.width - 8.0, 2.0),
+            &core_graphics::geometry::CGSize::new(4.0, view_height - 4.0),
+        );
+        ctx.fill_rect(track_rect);
+
+        // Draw scroll indicator
+        ctx.set_rgb_fill_color(0.5, 0.5, 0.55, 0.8);
+        let indicator_rect = core_graphics::geometry::CGRect::new(
+            &core_graphics::geometry::CGPoint::new(bounds.size.width - 8.0, indicator_y + 2.0),
+            &core_graphics::geometry::CGSize::new(4.0, indicator_height - 4.0),
+        );
+        ctx.fill_rect(indicator_rect);
     }
 
     fn draw_calendar(
@@ -169,8 +266,18 @@ impl PanelView {
 
         // Draw month/year header
         let month_names = [
-            "January", "February", "March", "April", "May", "June",
-            "July", "August", "September", "October", "November", "December",
+            "January",
+            "February",
+            "March",
+            "April",
+            "May",
+            "June",
+            "July",
+            "August",
+            "September",
+            "October",
+            "November",
+            "December",
         ];
         let header = format!("{} {}", month_names[(month - 1) as usize], year);
 
@@ -254,7 +361,8 @@ impl PanelView {
             ("Bluetooth", "On"),
         ];
 
-        let cards_per_row = ((bounds.size.width - padding * 2.0) / (card_width + card_spacing)) as usize;
+        let cards_per_row =
+            ((bounds.size.width - padding * 2.0) / (card_width + card_spacing)) as usize;
 
         for (i, (label, value)) in info.iter().enumerate() {
             let row = i / cards_per_row;
@@ -285,7 +393,7 @@ impl PanelView {
         &self,
         ctx: &mut core_graphics::context::CGContext,
         graphics: &Graphics,
-        bounds: NSRect,
+        _bounds: NSRect,
         sections: &[PanelSection],
     ) {
         let padding = 20.0;

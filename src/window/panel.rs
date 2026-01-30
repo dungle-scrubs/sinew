@@ -1,15 +1,49 @@
 //! Full-width slide-down panel
 
-use objc2::MainThreadMarker;
 use objc2::rc::Retained;
+use objc2::{define_class, msg_send, MainThreadMarker, MainThreadOnly};
 use objc2_app_kit::{
     NSBackingStoreType, NSColor, NSView, NSWindow, NSWindowCollectionBehavior, NSWindowStyleMask,
 };
 use objc2_foundation::{NSPoint, NSRect, NSSize};
 
+// Custom window class that doesn't steal focus
+define_class!(
+    #[unsafe(super(NSWindow))]
+    #[thread_kind = MainThreadOnly]
+    #[name = "RustyBarPanelWindow"]
+    struct RustyBarPanelWindow;
+
+    impl RustyBarPanelWindow {
+        #[unsafe(method(canBecomeKeyWindow))]
+        fn can_become_key_window(&self) -> bool {
+            false
+        }
+
+        #[unsafe(method(canBecomeMainWindow))]
+        fn can_become_main_window(&self) -> bool {
+            false
+        }
+    }
+);
+
+impl RustyBarPanelWindow {
+    fn new(mtm: MainThreadMarker, frame: NSRect, style: NSWindowStyleMask) -> Retained<Self> {
+        unsafe {
+            msg_send![
+                Self::alloc(mtm),
+                initWithContentRect: frame,
+                styleMask: style,
+                backing: NSBackingStoreType::Buffered,
+                defer: false
+            ]
+        }
+    }
+}
+
 /// A full-width panel that appears below the menu bar
 pub struct Panel {
-    window: Retained<NSWindow>,
+    window: Retained<RustyBarPanelWindow>,
     is_visible: bool,
     bar_y: f64,
     screen_width: f64,
@@ -41,20 +75,12 @@ impl Panel {
         );
         let style = NSWindowStyleMask::Borderless;
 
-        let window = unsafe {
-            NSWindow::initWithContentRect_styleMask_backing_defer(
-                mtm.alloc::<NSWindow>(),
-                frame,
-                style,
-                NSBackingStoreType::Buffered,
-                false,
-            )
-        };
+        let window = RustyBarPanelWindow::new(mtm, frame, style);
 
-        // Configure window
-        window.setLevel(25); // Same as status bar
+        // Configure window - floating level (above normal windows, below notifications)
+        window.setLevel(3); // NSFloatingWindowLevel
         window.setOpaque(false);
-        window.setHasShadow(false); // No shadow - we draw bottom border manually
+        window.setHasShadow(false); // No shadow - appears as extension of bar
 
         // Set background color
         let bg_color = NSColor::colorWithSRGBRed_green_blue_alpha(0.1, 0.1, 0.14, 0.98);

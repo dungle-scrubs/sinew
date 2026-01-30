@@ -70,11 +70,22 @@ impl Graphics {
             attr_string.set_attribute(range, kCTFontAttributeName, &self.font);
         }
 
+        // Set foreground color attribute on the attributed string
+        // This is the proper way to set text color for CTLineDraw
+        let color = core_graphics::color::CGColor::rgb(r, g, b, a);
+        unsafe {
+            use core_text::string_attributes::kCTForegroundColorAttributeName;
+            attr_string.set_attribute::<core_graphics::color::CGColor>(
+                range,
+                kCTForegroundColorAttributeName,
+                &color,
+            );
+        }
+
         // Create CTLine and draw
         let line = CTLine::new_with_attributed_string(attr_string.as_concrete_TypeRef());
 
-        // Set text color
-        let color = core_graphics::color::CGColor::rgb(r, g, b, a);
+        // Also set fill color as backup (some contexts may use this)
         ctx.set_fill_color(&color);
 
         // In flipped coordinate system, we need to flip the text matrix

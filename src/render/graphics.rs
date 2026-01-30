@@ -40,6 +40,15 @@ impl Graphics {
     }
 
     pub fn draw_text(&self, ctx: &mut CGContext, text: &str, x: f64, y: f64) {
+        self.draw_text_internal(ctx, text, x, y, false);
+    }
+
+    /// Draw text in a flipped coordinate system (isFlipped = true)
+    pub fn draw_text_flipped(&self, ctx: &mut CGContext, text: &str, x: f64, y: f64) {
+        self.draw_text_internal(ctx, text, x, y, true);
+    }
+
+    fn draw_text_internal(&self, ctx: &mut CGContext, text: &str, x: f64, y: f64, flipped: bool) {
         use core_foundation::attributed_string::CFMutableAttributedString;
         use core_foundation::base::CFRange;
         use core_text::line::CTLine;
@@ -68,16 +77,31 @@ impl Graphics {
         let color = core_graphics::color::CGColor::rgb(r, g, b, a);
         ctx.set_fill_color(&color);
 
-        let identity = core_graphics::geometry::CGAffineTransform {
-            a: 1.0,
-            b: 0.0,
-            c: 0.0,
-            d: 1.0,
-            tx: 0.0,
-            ty: 0.0,
+        // In flipped coordinate system, we need to flip the text matrix
+        let text_matrix = if flipped {
+            core_graphics::geometry::CGAffineTransform {
+                a: 1.0,
+                b: 0.0,
+                c: 0.0,
+                d: -1.0, // Flip vertically
+                tx: 0.0,
+                ty: 0.0,
+            }
+        } else {
+            core_graphics::geometry::CGAffineTransform {
+                a: 1.0,
+                b: 0.0,
+                c: 0.0,
+                d: 1.0,
+                tx: 0.0,
+                ty: 0.0,
+            }
         };
-        ctx.set_text_matrix(&identity);
-        ctx.set_text_position(x, y);
+        ctx.set_text_matrix(&text_matrix);
+
+        // Adjust Y position for flipped text (add ascent to position baseline correctly)
+        let draw_y = if flipped { y + self.font.ascent() } else { y };
+        ctx.set_text_position(x, draw_y);
 
         // Draw the line
         unsafe {

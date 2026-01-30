@@ -40,7 +40,6 @@ struct PopupState {
 }
 
 /// Content types that can be displayed in a popup.
-#[derive(Clone)]
 pub enum PopupContent {
     /// Static text lines, displayed with scrolling support
     Text(Vec<String>),
@@ -50,6 +49,8 @@ pub enum PopupContent {
     Info(Vec<(String, String)>),
     /// Loading indicator
     Loading,
+    /// Component-based content for flexible layouts
+    Components(Vec<Box<dyn crate::components::Component>>),
 }
 
 define_class!(
@@ -176,6 +177,19 @@ impl PopupView {
             PopupContent::Info(pairs) => padding * 2.0 + (pairs.len() as f64) * line_height,
             PopupContent::Calendar { .. } => 200.0,
             PopupContent::Loading => 50.0,
+            PopupContent::Components(components) => {
+                // Estimate height based on components
+                let measure_ctx = crate::components::MeasureContext {
+                    max_width: 200.0, // Default popup width
+                    font_family: "SF Pro",
+                    font_size: 13.0,
+                };
+                let mut total_height = padding * 2.0;
+                for component in components {
+                    total_height += component.measure(&measure_ctx).height;
+                }
+                total_height
+            }
         }
     }
 
@@ -282,6 +296,37 @@ impl PopupView {
                     padding,
                     top_ext + padding,
                 );
+            }
+            PopupContent::Components(components) => {
+                let mut y = top_ext + padding - scroll_offset;
+                let available_width = bounds.size.width - padding * 2.0;
+
+                // Get text color from graphics (default to light gray)
+                let text_color = (0.8, 0.85, 0.95, 1.0);
+
+                for component in components {
+                    let measure_ctx = crate::components::MeasureContext {
+                        max_width: available_width,
+                        font_family: "SF Pro",
+                        font_size: 13.0,
+                    };
+                    let size = component.measure(&measure_ctx);
+
+                    if y + size.height > top_ext && y < bounds.size.height {
+                        let mut draw_ctx = crate::components::DrawContext {
+                            cg: &mut ctx,
+                            x: padding,
+                            y,
+                            width: available_width,
+                            height: size.height,
+                            font_family: "SF Pro",
+                            font_size: 13.0,
+                            text_color,
+                        };
+                        component.draw(&mut draw_ctx);
+                    }
+                    y += size.height;
+                }
             }
         }
 

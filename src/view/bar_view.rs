@@ -1,5 +1,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::Mutex;
 
 use objc2::rc::Retained;
 use objc2::{define_class, msg_send, MainThreadMarker, MainThreadOnly};
@@ -18,6 +20,29 @@ use crate::window::WindowPosition;
 
 thread_local! {
     static VIEW_STATES: RefCell<HashMap<usize, ViewState>> = RefCell::new(HashMap::new());
+}
+
+/// Global channel for sending click events from NSView to the main loop
+static CLICK_CHANNEL: Mutex<Option<Sender<ViewClickEvent>>> = Mutex::new(None);
+
+/// Click event from the view to the main loop
+pub struct ViewClickEvent {
+    pub view_id: usize,
+    pub popup_info: Option<PopupInfo>,
+}
+
+/// Initialize the click channel and return the receiver
+pub fn init_click_channel() -> Receiver<ViewClickEvent> {
+    let (tx, rx) = mpsc::channel();
+    *CLICK_CHANNEL.lock().unwrap() = Some(tx);
+    rx
+}
+
+/// Send a click event (called from mouseUp)
+fn send_click_event(event: ViewClickEvent) {
+    if let Some(ref tx) = *CLICK_CHANNEL.lock().unwrap() {
+        let _ = tx.send(event);
+    }
 }
 
 struct ViewState {
@@ -102,6 +127,7 @@ define_class!(
         fn mouse_down(&self, event: &NSEvent) {
             let location = event.locationInWindow();
             let local = self.convert_point_from_view(location, None);
+            log::debug!("mouseDown at ({:.1}, {:.1})", local.x, local.y);
             let view_id = self as *const _ as usize;
 
             VIEW_STATES.with(|states| {
@@ -117,33 +143,85 @@ define_class!(
                     }
                 }
             });
-            self.setNeedsDisplay(true);
-
-            // Deactivate app to prevent focus stealing
-            let app = NSApplication::sharedApplication(objc2::MainThreadMarker::new().unwrap());
-            unsafe { objc2::msg_send![&app, deactivate] }
+            // Force immediate redraw so pressed state is visible
+            self.display();
         }
 
         #[unsafe(method(mouseUp:))]
         fn mouse_up(&self, event: &NSEvent) {
             let location = event.locationInWindow();
             let local = self.convert_point_from_view(location, None);
+            log::trace!("mouseUp at ({:.1}, {:.1})", local.x, local.y);
 
             let view_id = self as *const _ as usize;
             let mut click_command: Option<String> = None;
+            let mut popup_info: Option<PopupInfo> = None;
+            let mut toggle_state: Option<bool> = None;
+            let mut clicked_toggle_group: Option<String> = None;
 
             VIEW_STATES.with(|states| {
                 if let Some(state) = states.borrow_mut().get_mut(&view_id) {
-                    // Clear pressed state
+                    // Clear pressed state (after the 50ms delay above)
                     state.pressed_module_x = None;
 
+                    // Find clicked module and collect info
+                    let mut clicked_index: Option<usize> = None;
+
                     if let Some(cache) = &state.cache {
-                        for positioned in &cache.modules {
+                        for (i, positioned) in cache.modules.iter().enumerate() {
                             if positioned.contains_point(local.x) {
+                                clicked_index = Some(i);
                                 if let Some(ref cmd) = positioned.click_command {
                                     click_command = Some(cmd.clone());
                                 }
+                                // Check for popup config
+                                if let Some(ref popup) = positioned.popup {
+                                    if let Some(ref popup_type) = popup.popup_type {
+                                        popup_info = Some(PopupInfo {
+                                            popup_type: popup_type.clone(),
+                                            width: popup.width,
+                                            height: popup.height,
+                                            max_height_percent: popup.max_height_percent,
+                                            command: popup.command.clone(),
+                                            module_x: positioned.x,
+                                            module_width: positioned.width,
+                                            anchor: popup.anchor,
+                                        });
+                                    }
+                                }
+                                // Collect toggle info
+                                if positioned.toggle_enabled {
+                                    clicked_toggle_group = positioned.toggle_group.clone();
+                                }
                                 break;
+                            }
+                        }
+                    }
+
+                    // Handle toggle on left click
+                    log::trace!("clicked_index={:?}", clicked_index);
+                    if let Some(idx) = clicked_index {
+                        if let Some(cache) = &mut state.cache {
+                            let module = &mut cache.modules[idx];
+                            log::trace!("toggle module={}", module.module.id());
+                            if module.toggle_enabled {
+                                module.toggle_active = !module.toggle_active;
+                                toggle_state = Some(module.toggle_active);
+                                log::trace!("toggled to {}", module.toggle_active);
+
+                                // If now active and has toggle_group, deactivate others
+                                if module.toggle_active {
+                                    if let Some(ref group) = clicked_toggle_group {
+                                        let my_id = module.module.id().to_string();
+                                        for other in cache.modules.iter_mut() {
+                                            if other.toggle_group.as_ref() == Some(group)
+                                                && other.module.id() != my_id
+                                            {
+                                                other.toggle_active = false;
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -152,13 +230,21 @@ define_class!(
 
             // Execute click command if one was found
             if let Some(cmd) = click_command {
-                log::info!("Executing click command: {}", cmd);
+                let toggle_env = toggle_state
+                    .map(|active| if active { "on" } else { "off" })
+                    .unwrap_or("off");
+                log::debug!("Executing click command: {}", cmd);
                 std::thread::spawn(move || {
                     let _ = std::process::Command::new("sh")
                         .args(["-c", &cmd])
+                        .env("TOGGLE_STATE", toggle_env)
                         .spawn();
                 });
             }
+
+            // Send click event to main loop for popup handling
+            send_click_event(ViewClickEvent { view_id, popup_info });
+
             self.setNeedsDisplay(true);
 
             // Deactivate app to return focus to previous app

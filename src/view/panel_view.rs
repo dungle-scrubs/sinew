@@ -25,7 +25,6 @@ struct PanelState {
     bg_color: (f64, f64, f64, f64),
 }
 
-#[derive(Clone)]
 pub enum PanelContent {
     /// Calendar with navigation
     Calendar { year: i32, month: u32 },
@@ -35,6 +34,8 @@ pub enum PanelContent {
     Sections(Vec<PanelSection>),
     /// Scrollable text content
     Text(Vec<String>),
+    /// Component-based content for flexible layouts
+    Components(Vec<Box<dyn crate::components::Component>>),
 }
 
 #[derive(Clone)]
@@ -156,6 +157,18 @@ impl PanelView {
                 }
                 h + padding
             }
+            PanelContent::Components(components) => {
+                let measure_ctx = crate::components::MeasureContext {
+                    max_width: 800.0, // Default panel width
+                    font_family: "SF Pro",
+                    font_size: 13.0,
+                };
+                let mut total_height = padding * 2.0;
+                for component in components {
+                    total_height += component.measure(&measure_ctx).height;
+                }
+                total_height
+            }
         }
     }
 
@@ -219,6 +232,40 @@ impl PanelView {
                         state.graphics.draw_text_flipped(&mut ctx, line, padding, y);
                     }
                     y += line_height;
+                }
+                // Draw scroll indicator
+                self.draw_scroll_indicator(&mut ctx, bounds, state);
+            }
+            PanelContent::Components(components) => {
+                let padding = 20.0;
+                let mut y = padding - scroll_offset;
+                let available_width = bounds.size.width - padding * 2.0;
+
+                // Default text color
+                let text_color = (0.85, 0.87, 0.9, 1.0);
+
+                for component in components {
+                    let measure_ctx = crate::components::MeasureContext {
+                        max_width: available_width,
+                        font_family: "SF Pro",
+                        font_size: 13.0,
+                    };
+                    let size = component.measure(&measure_ctx);
+
+                    if y + size.height > 0.0 && y < bounds.size.height {
+                        let mut draw_ctx = crate::components::DrawContext {
+                            cg: &mut ctx,
+                            x: padding,
+                            y,
+                            width: available_width,
+                            height: size.height,
+                            font_family: "SF Pro",
+                            font_size: 13.0,
+                            text_color,
+                        };
+                        component.draw(&mut draw_ctx);
+                    }
+                    y += size.height;
                 }
                 // Draw scroll indicator
                 self.draw_scroll_indicator(&mut ctx, bounds, state);

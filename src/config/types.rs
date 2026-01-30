@@ -4,6 +4,7 @@ use serde::Deserialize;
 const KNOWN_MODULE_TYPES: &[&str] = &[
     "clock",
     "date",
+    "demo",
     "static",
     "battery",
     "cpu",
@@ -24,7 +25,7 @@ const KNOWN_MODULE_TYPES: &[&str] = &[
 const KNOWN_SEPARATOR_TYPES: &[&str] = &["space", "line", "dot", "icon"];
 
 /// Known popup types
-const KNOWN_POPUP_TYPES: &[&str] = &["calendar", "info", "script", "panel"];
+const KNOWN_POPUP_TYPES: &[&str] = &["calendar", "demo", "info", "script", "panel"];
 
 /// Known popup anchor positions
 const KNOWN_POPUP_ANCHORS: &[&str] = &["left", "center", "right"];

@@ -1,3 +1,7 @@
+// Allow dead code during development - remove before release
+#![allow(dead_code)]
+#![allow(unused_variables)]
+
 mod app;
 mod config;
 mod ipc;
@@ -26,9 +30,7 @@ fn main() {
                 view::bump_config_version();
                 "ok".to_string()
             }
-            ipc::IpcCommand::Status => {
-                r#"{"status":"running"}"#.to_string()
-            }
+            ipc::IpcCommand::Status => r#"{"status":"running"}"#.to_string(),
             ipc::IpcCommand::Toggle => {
                 // TODO: implement toggle
                 "ok".to_string()

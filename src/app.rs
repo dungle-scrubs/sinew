@@ -2,12 +2,14 @@ use std::sync::{Arc, RwLock};
 
 use objc2::rc::Retained;
 use objc2::MainThreadMarker;
-use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy, NSCursor, NSEvent};
-use objc2_foundation::{NSDate, NSRunLoop};
+use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy, NSEvent};
+use objc2_foundation::NSDate;
 
 use crate::config::{load_config, ConfigWatcher, SharedConfig};
-use crate::view::{bump_config_version, BarView};
-use crate::window::{get_main_screen_info, BarWindow, MouseEventKind, MouseMonitor, WindowBounds, WindowPosition};
+use chrono::Datelike;
+
+use crate::view::{bump_config_version, BarView, PanelContent, PanelView, PopupContent, PopupView};
+use crate::window::{get_main_screen_info, BarWindow, MouseEventKind, MouseMonitor, Panel, PopupWindow, WindowBounds, WindowPosition};
 
 pub struct App {
     _app: Retained<NSApplication>,
@@ -16,6 +18,21 @@ pub struct App {
     config: SharedConfig,
     config_watcher: Option<ConfigWatcher>,
     _mouse_monitor: Option<MouseMonitor>,
+    // Current popup state
+    popup: Option<ActivePopup>,
+    // Full-width panel
+    panel: Option<Panel>,
+    panel_view: Option<Retained<PanelView>>,
+    // Store screen info for panel creation
+    bar_y: f64,
+    screen_width: f64,
+}
+
+struct ActivePopup {
+    window: PopupWindow,
+    _view: Retained<PopupView>,
+    /// Module ID that opened this popup (to toggle on re-click)
+    module_x: f64,
 }
 
 impl App {
@@ -40,7 +57,10 @@ impl App {
             }
         };
 
-        let (windows, views, mouse_monitor) = Self::create_windows(mtm, &config);
+        let (windows, views, mouse_monitor, screen_info) = Self::create_windows(mtm, &config);
+
+        // Extract screen dimensions for panel
+        let (bar_y, screen_width) = screen_info.unwrap_or((0.0, 0.0));
 
         Self {
             _app: app,
@@ -49,16 +69,22 @@ impl App {
             config,
             config_watcher,
             _mouse_monitor: mouse_monitor,
+            popup: None,
+            panel: None,
+            panel_view: None,
+            bar_y,
+            screen_width,
         }
     }
 
     fn create_windows(
         mtm: MainThreadMarker,
         config: &SharedConfig,
-    ) -> (Vec<BarWindow>, Vec<Retained<BarView>>, Option<MouseMonitor>) {
+    ) -> (Vec<BarWindow>, Vec<Retained<BarView>>, Option<MouseMonitor>, Option<(f64, f64)>) {
         let mut windows = Vec::new();
         let mut views = Vec::new();
         let mut window_bounds = Vec::new();
+        let mut screen_dimensions: Option<(f64, f64)> = None;
 
         let height = config
             .read()
@@ -79,6 +105,9 @@ impl App {
                 screen_info.has_notch,
                 screen_info.notch_width
             );
+
+            // Store screen dimensions for panel creation
+            screen_dimensions = Some((window_y, screen_width));
 
             if screen_info.has_notch {
                 let left_window = BarWindow::new(mtm, &screen_info, WindowPosition::Left, height);
@@ -157,7 +186,7 @@ impl App {
             None
         };
 
-        (windows, views, mouse_monitor)
+        (windows, views, mouse_monitor, screen_dimensions)
     }
 
     pub fn run(mut self, mtm: MainThreadMarker) {
@@ -308,14 +337,138 @@ impl App {
                             MouseEventKind::RightUp
                         };
                         log::debug!("Click detected: {:?} at ({:.1}, {:.1})", event_kind, x, y);
-                        crate::view::handle_mouse_event(
+
+                        // Handle click and check for popup
+                        let popup_info = crate::view::handle_mouse_event(
                             view_id,
                             event_kind,
                             x,
                             y,
                             &self.config,
                         );
+
+                        // Handle popup showing/hiding
+                        if let Some(info) = popup_info {
+                            // Handle panel type specially - before popup handling
+                            if info.popup_type == "panel" {
+                                log::debug!("Panel click detected, toggling panel");
+
+                                // Close any existing popup first
+                                if let Some(popup) = self.popup.take() {
+                                    popup.window.hide();
+                                }
+
+                                // Toggle the full-width panel
+                                if let Some(ref mut panel) = self.panel {
+                                    panel.toggle();
+                                } else {
+                                    // Create the panel lazily
+                                    let panel_height = 300.0;
+                                    let mut panel = Panel::new(
+                                        mtm,
+                                        self.screen_width,
+                                        self.bar_y,
+                                        panel_height,
+                                    );
+
+                                    // Create panel content (calendar by default)
+                                    let now = chrono::Local::now();
+                                    let panel_view = PanelView::new(
+                                        mtm,
+                                        PanelContent::Calendar {
+                                            year: now.year(),
+                                            month: now.month(),
+                                        },
+                                    );
+                                    panel.set_content_view(&panel_view);
+                                    panel.show();
+
+                                    self.panel = Some(panel);
+                                    self.panel_view = Some(panel_view);
+                                }
+                                // Update button state before continue to prevent repeated detection
+                                last_mouse_buttons = current_buttons;
+                                continue;
+                            }
+
+                            // Close panel when opening a regular popup
+                            if let Some(ref mut panel) = self.panel {
+                                panel.hide();
+                            }
+
+                            // Check if clicking same module that has popup open - toggle it
+                            let should_close = self.popup.as_ref().map_or(false, |p| {
+                                (p.module_x - info.module_x).abs() < 1.0
+                            });
+
+                            if should_close {
+                                // Close existing popup
+                                if let Some(popup) = self.popup.take() {
+                                    popup.window.hide();
+                                }
+                            } else {
+                                // Close any existing popup
+                                if let Some(popup) = self.popup.take() {
+                                    popup.window.hide();
+                                }
+
+                                // Create and show new popup
+                                let window_frame = self.windows[idx].window.frame();
+                                let popup_x = window_frame.origin.x + info.module_x + info.module_width / 2.0;
+                                let popup_y = window_frame.origin.y; // Below the bar
+
+                                let popup_window = PopupWindow::new(mtm, info.width, info.height);
+
+                                let content = match info.popup_type.as_str() {
+                                    "calendar" => {
+                                        let now = chrono::Local::now();
+                                        PopupContent::Calendar {
+                                            year: now.year(),
+                                            month: now.month(),
+                                        }
+                                    }
+                                    "script" => {
+                                        if let Some(ref cmd) = info.command {
+                                            // Run command and get output
+                                            let output = std::process::Command::new("sh")
+                                                .args(["-c", cmd])
+                                                .output()
+                                                .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+                                                .unwrap_or_else(|_| "Error running command".to_string());
+                                            let lines: Vec<String> = output.lines().map(|s| s.to_string()).collect();
+                                            PopupContent::Text(lines)
+                                        } else {
+                                            PopupContent::Text(vec!["No command configured".to_string()])
+                                        }
+                                    }
+                                    _ => PopupContent::Text(vec![format!("Popup type: {}", info.popup_type)]),
+                                };
+
+                                let popup_view = PopupView::new(mtm, content);
+                                popup_window.window().setContentView(Some(&popup_view));
+                                popup_window.show_at(popup_x, popup_y);
+
+                                self.popup = Some(ActivePopup {
+                                    window: popup_window,
+                                    _view: popup_view,
+                                    module_x: info.module_x,
+                                });
+                            }
+                        } else if self.popup.is_some() {
+                            // Clicked on bar but not on a module with popup - close popup
+                            if let Some(popup) = self.popup.take() {
+                                popup.window.hide();
+                            }
+                        }
                     }
+                }
+            } else if (last_mouse_buttons & 1) != 0 && (current_buttons & 1) == 0 {
+                // Clicked outside bar windows - close popup and panel
+                if let Some(popup) = self.popup.take() {
+                    popup.window.hide();
+                }
+                if let Some(ref mut panel) = self.panel {
+                    panel.hide();
                 }
             }
             last_mouse_buttons = current_buttons;

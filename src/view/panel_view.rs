@@ -1,0 +1,315 @@
+//! Panel view for full-width slide-down panels
+
+use objc2::rc::Retained;
+use objc2::{define_class, msg_send, MainThreadMarker, MainThreadOnly};
+use objc2_app_kit::{NSColor, NSGraphicsContext, NSRectFill, NSView};
+use objc2_foundation::{NSPoint, NSRect, NSSize};
+use std::cell::RefCell;
+use std::collections::HashMap;
+
+use crate::render::Graphics;
+
+thread_local! {
+    static PANEL_STATES: RefCell<HashMap<usize, PanelState>> = RefCell::new(HashMap::new());
+}
+
+struct PanelState {
+    content: PanelContent,
+    graphics: Graphics,
+}
+
+#[derive(Clone)]
+pub enum PanelContent {
+    /// Calendar with navigation
+    Calendar {
+        year: i32,
+        month: u32,
+    },
+    /// System info grid
+    SystemInfo,
+    /// Custom content with sections
+    Sections(Vec<PanelSection>),
+}
+
+#[derive(Clone)]
+pub struct PanelSection {
+    pub title: String,
+    pub items: Vec<PanelItem>,
+}
+
+#[derive(Clone)]
+pub struct PanelItem {
+    pub icon: String,
+    pub label: String,
+    pub value: Option<String>,
+}
+
+define_class!(
+    #[unsafe(super(NSView))]
+    #[thread_kind = MainThreadOnly]
+    #[name = "PanelView"]
+    pub struct PanelView;
+
+    impl PanelView {
+        #[unsafe(method(drawRect:))]
+        fn draw_rect(&self, _dirty_rect: NSRect) {
+            let view_id = self as *const _ as usize;
+            PANEL_STATES.with(|states| {
+                if let Some(state) = states.borrow().get(&view_id) {
+                    self.draw_content(state);
+                }
+            });
+        }
+
+        #[unsafe(method(isOpaque))]
+        fn is_opaque(&self) -> bool {
+            false
+        }
+
+        #[unsafe(method(isFlipped))]
+        fn is_flipped(&self) -> bool {
+            true
+        }
+    }
+);
+
+impl PanelView {
+    pub fn new(mtm: MainThreadMarker, content: PanelContent) -> Retained<Self> {
+        let view: Retained<Self> = unsafe { msg_send![Self::alloc(mtm), init] };
+
+        let view_id = &*view as *const _ as usize;
+
+        let graphics = Graphics::new(
+            "#1a1b26",
+            "#c8cdd5",
+            "SF Pro",
+            14.0,
+        );
+
+        let state = PanelState { content, graphics };
+
+        PANEL_STATES.with(|states| {
+            states.borrow_mut().insert(view_id, state);
+        });
+
+        view
+    }
+
+    pub fn set_content(&self, content: PanelContent) {
+        let view_id = self as *const _ as usize;
+        PANEL_STATES.with(|states| {
+            if let Some(state) = states.borrow_mut().get_mut(&view_id) {
+                state.content = content;
+            }
+        });
+        self.setNeedsDisplay(true);
+    }
+
+    fn draw_content(&self, state: &PanelState) {
+        let bounds = self.bounds();
+
+        // Draw background - matches bar color (#1e1e2e)
+        let bg_color = NSColor::colorWithSRGBRed_green_blue_alpha(0.118, 0.118, 0.180, 1.0);
+        bg_color.set();
+        NSRectFill(bounds);
+
+        // Draw subtle bottom border only (isFlipped, so bottom is at max y)
+        let border_color = NSColor::colorWithSRGBRed_green_blue_alpha(0.2, 0.2, 0.25, 0.8);
+        border_color.set();
+        let border_rect = NSRect::new(
+            NSPoint::new(0.0, bounds.size.height - 0.5),
+            NSSize::new(bounds.size.width, 0.5),
+        );
+        NSRectFill(border_rect);
+
+        // Get graphics context
+        let Some(ns_context) = NSGraphicsContext::currentContext() else {
+            return;
+        };
+
+        let cg_context = ns_context.CGContext();
+        let cg_context_ptr: *mut core_graphics::sys::CGContext =
+            Retained::as_ptr(&cg_context) as *const _ as *mut _;
+
+        let mut ctx =
+            unsafe { core_graphics::context::CGContext::from_existing_context_ptr(cg_context_ptr) };
+
+        match &state.content {
+            PanelContent::Calendar { year, month } => {
+                self.draw_calendar(&mut ctx, &state.graphics, bounds, *year, *month);
+            }
+            PanelContent::SystemInfo => {
+                self.draw_system_info(&mut ctx, &state.graphics, bounds);
+            }
+            PanelContent::Sections(sections) => {
+                self.draw_sections(&mut ctx, &state.graphics, bounds, sections);
+            }
+        }
+
+        std::mem::forget(ctx);
+    }
+
+    fn draw_calendar(
+        &self,
+        ctx: &mut core_graphics::context::CGContext,
+        graphics: &Graphics,
+        bounds: NSRect,
+        year: i32,
+        month: u32,
+    ) {
+        use chrono::{Datelike, NaiveDate};
+
+        let padding = 20.0;
+        let cell_size = 36.0;
+        let header_height = 50.0;
+
+        // Center the calendar
+        let calendar_width = cell_size * 7.0;
+        let start_x = (bounds.size.width - calendar_width) / 2.0;
+
+        // Draw month/year header
+        let month_names = [
+            "January", "February", "March", "April", "May", "June",
+            "July", "August", "September", "October", "November", "December",
+        ];
+        let header = format!("{} {}", month_names[(month - 1) as usize], year);
+
+        // Draw header centered
+        let header_x = start_x + (calendar_width - 150.0) / 2.0;
+        graphics.draw_text_flipped(ctx, &header, header_x, padding);
+
+        // Draw day headers
+        let days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+        let day_header_y = padding + header_height;
+        for (i, day) in days.iter().enumerate() {
+            let x = start_x + (i as f64) * cell_size;
+            ctx.set_rgb_fill_color(0.5, 0.5, 0.55, 1.0);
+            graphics.draw_text_flipped(ctx, day, x + 4.0, day_header_y);
+        }
+
+        // Get first day of month and number of days
+        let first_day = NaiveDate::from_ymd_opt(year, month, 1).unwrap();
+        let days_in_month = if month == 12 {
+            NaiveDate::from_ymd_opt(year + 1, 1, 1)
+        } else {
+            NaiveDate::from_ymd_opt(year, month + 1, 1)
+        }
+        .unwrap()
+        .signed_duration_since(first_day)
+        .num_days() as u32;
+
+        let start_weekday = first_day.weekday().num_days_from_sunday() as usize;
+        let today = chrono::Local::now().date_naive();
+
+        // Draw days
+        let mut row = 0;
+        let mut col = start_weekday;
+        for day in 1..=days_in_month {
+            let x = start_x + (col as f64) * cell_size;
+            let y = day_header_y + 30.0 + (row as f64) * cell_size;
+
+            // Highlight today
+            let current_date = NaiveDate::from_ymd_opt(year, month, day).unwrap();
+            if current_date == today {
+                ctx.set_rgb_fill_color(0.3, 0.5, 0.9, 0.8);
+                let r = 14.0;
+                let cx = x + cell_size / 2.0 - r;
+                let cy = y + 8.0 - r;
+                let circle_rect = core_graphics::geometry::CGRect::new(
+                    &core_graphics::geometry::CGPoint::new(cx, cy),
+                    &core_graphics::geometry::CGSize::new(r * 2.0, r * 2.0),
+                );
+                ctx.fill_ellipse_in_rect(circle_rect);
+            }
+
+            ctx.set_rgb_fill_color(0.85, 0.87, 0.9, 1.0);
+            graphics.draw_text_flipped(ctx, &format!("{:2}", day), x + 8.0, y);
+
+            col += 1;
+            if col >= 7 {
+                col = 0;
+                row += 1;
+            }
+        }
+    }
+
+    fn draw_system_info(
+        &self,
+        ctx: &mut core_graphics::context::CGContext,
+        graphics: &Graphics,
+        bounds: NSRect,
+    ) {
+        let padding = 20.0;
+        let card_width = 150.0;
+        let card_height = 80.0;
+        let card_spacing = 15.0;
+
+        // Get system info
+        let info = [
+            ("CPU", "45%"),
+            ("Memory", "8.2 GB"),
+            ("Disk", "234 GB"),
+            ("Battery", "87%"),
+            ("WiFi", "Connected"),
+            ("Bluetooth", "On"),
+        ];
+
+        let cards_per_row = ((bounds.size.width - padding * 2.0) / (card_width + card_spacing)) as usize;
+
+        for (i, (label, value)) in info.iter().enumerate() {
+            let row = i / cards_per_row;
+            let col = i % cards_per_row;
+
+            let x = padding + (col as f64) * (card_width + card_spacing);
+            let y = padding + (row as f64) * (card_height + card_spacing);
+
+            // Draw card background
+            ctx.set_rgb_fill_color(0.15, 0.15, 0.2, 0.8);
+            let rect = core_graphics::geometry::CGRect::new(
+                &core_graphics::geometry::CGPoint::new(x, y),
+                &core_graphics::geometry::CGSize::new(card_width, card_height),
+            );
+            ctx.fill_rect(rect);
+
+            // Draw label
+            ctx.set_rgb_fill_color(0.6, 0.62, 0.65, 1.0);
+            graphics.draw_text_flipped(ctx, label, x + 12.0, y + 15.0);
+
+            // Draw value
+            ctx.set_rgb_fill_color(0.9, 0.92, 0.95, 1.0);
+            graphics.draw_text_flipped(ctx, value, x + 12.0, y + 45.0);
+        }
+    }
+
+    fn draw_sections(
+        &self,
+        ctx: &mut core_graphics::context::CGContext,
+        graphics: &Graphics,
+        bounds: NSRect,
+        sections: &[PanelSection],
+    ) {
+        let padding = 20.0;
+        let mut y = padding;
+
+        for section in sections {
+            // Draw section title
+            ctx.set_rgb_fill_color(0.5, 0.52, 0.55, 1.0);
+            graphics.draw_text_flipped(ctx, &section.title, padding, y);
+            y += 30.0;
+
+            // Draw items
+            for item in &section.items {
+                ctx.set_rgb_fill_color(0.85, 0.87, 0.9, 1.0);
+                let text = if let Some(ref value) = item.value {
+                    format!("{} {}  {}", item.icon, item.label, value)
+                } else {
+                    format!("{} {}", item.icon, item.label)
+                };
+                graphics.draw_text_flipped(ctx, &text, padding + 10.0, y);
+                y += 24.0;
+            }
+
+            y += 15.0; // Section spacing
+        }
+    }
+}

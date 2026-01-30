@@ -495,6 +495,9 @@ pub struct BarConfig {
     pub popup_background_color: Option<String>,
     /// Popup/panel text color (defaults to bar text_color)
     pub popup_text_color: Option<String>,
+    /// Theme configuration for semantic colors
+    #[serde(default)]
+    pub theme: ThemeConfig,
 }
 
 impl Default for BarConfig {
@@ -513,6 +516,7 @@ impl Default for BarConfig {
             notch: NotchConfig::default(),
             popup_background_color: None,
             popup_text_color: None,
+            theme: ThemeConfig::default(),
         }
     }
 }
@@ -569,6 +573,99 @@ fn default_notch_corner_radius() -> f64 {
     8.0
 }
 
+/// Theme configuration for semantic colors
+#[derive(Debug, Deserialize, Clone)]
+pub struct ThemeConfig {
+    /// Muted text color (e.g., secondary text, captions)
+    #[serde(default = "default_theme_muted")]
+    pub muted: String,
+    /// Muted foreground color
+    #[serde(default = "default_theme_muted_foreground")]
+    pub muted_foreground: String,
+    /// Accent color (e.g., links, highlights)
+    #[serde(default = "default_theme_accent")]
+    pub accent: String,
+    /// Accent foreground color (text on accent backgrounds)
+    #[serde(default = "default_theme_accent_foreground")]
+    pub accent_foreground: String,
+    /// Destructive/error color
+    #[serde(default = "default_theme_destructive")]
+    pub destructive: String,
+    /// Success color
+    #[serde(default = "default_theme_success")]
+    pub success: String,
+    /// Warning color
+    #[serde(default = "default_theme_warning")]
+    pub warning: String,
+    /// Card background color
+    #[serde(default = "default_theme_card")]
+    pub card: String,
+    /// Card foreground color
+    #[serde(default = "default_theme_card_foreground")]
+    pub card_foreground: String,
+    /// Border color
+    #[serde(default = "default_theme_border")]
+    pub border: String,
+}
+
+impl Default for ThemeConfig {
+    fn default() -> Self {
+        Self {
+            muted: default_theme_muted(),
+            muted_foreground: default_theme_muted_foreground(),
+            accent: default_theme_accent(),
+            accent_foreground: default_theme_accent_foreground(),
+            destructive: default_theme_destructive(),
+            success: default_theme_success(),
+            warning: default_theme_warning(),
+            card: default_theme_card(),
+            card_foreground: default_theme_card_foreground(),
+            border: default_theme_border(),
+        }
+    }
+}
+
+// Catppuccin Mocha default colors
+fn default_theme_muted() -> String {
+    "#6c7086".to_string()
+}
+
+fn default_theme_muted_foreground() -> String {
+    "#9399b2".to_string()
+}
+
+fn default_theme_accent() -> String {
+    "#89b4fa".to_string()
+}
+
+fn default_theme_accent_foreground() -> String {
+    "#1e1e2e".to_string()
+}
+
+fn default_theme_destructive() -> String {
+    "#f38ba8".to_string()
+}
+
+fn default_theme_success() -> String {
+    "#a6e3a1".to_string()
+}
+
+fn default_theme_warning() -> String {
+    "#f9e2af".to_string()
+}
+
+fn default_theme_card() -> String {
+    "#313244".to_string()
+}
+
+fn default_theme_card_foreground() -> String {
+    "#cdd6f4".to_string()
+}
+
+fn default_theme_border() -> String {
+    "#45475a".to_string()
+}
+
 #[derive(Debug, Deserialize, Clone)]
 pub struct ClockConfig {
     /// Time format string (chrono format)
@@ -589,7 +686,7 @@ impl Default for ClockConfig {
 }
 
 fn default_bg_color() -> String {
-    "#1e1e2e".to_string()
+    "#181825".to_string() // Catppuccin Mantle (darker than Base #1e1e2e)
 }
 
 fn default_text_color() -> String {

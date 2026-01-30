@@ -62,7 +62,7 @@ define_class!(
     impl RustyBarWindow {
         #[unsafe(method(canBecomeKeyWindow))]
         fn can_become_key_window(&self) -> bool {
-            false
+            true  // Need this to receive mouse events
         }
 
         #[unsafe(method(canBecomeMainWindow))]
@@ -150,9 +150,11 @@ impl BarWindow {
 
         // Receive mouse events - the view will handle them
         window.setIgnoresMouseEvents(false);
+        window.setAcceptsMouseMovedEvents(true);
 
-        // Use private CGS API to prevent activation (like SketchyBar does)
-        prevent_window_activation(&window);
+        // NOTE: CGS activation prevention was blocking mouse events
+        // Use window behaviors instead to manage focus
+        // prevent_window_activation(&window);
 
         // Set window title for debugging
         let title = match position {

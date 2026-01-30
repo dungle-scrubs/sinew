@@ -45,7 +45,7 @@ impl std::fmt::Display for ConfigIssue {
     }
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, Default)]
 pub struct Config {
     #[serde(default)]
     pub bar: BarConfig,
@@ -183,16 +183,6 @@ pub struct ModuleConfig {
 
 fn default_show_while_loading() -> bool {
     true
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            bar: BarConfig::default(),
-            modules: ModulesConfig::default(),
-            clock: ClockConfig::default(),
-        }
-    }
 }
 
 impl Config {

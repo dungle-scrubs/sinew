@@ -6,7 +6,7 @@ use std::sync::Mutex;
 use objc2::rc::Retained;
 use objc2::{define_class, msg_send, MainThreadMarker, MainThreadOnly};
 use objc2_app_kit::{
-    NSApplication, NSBezierPath, NSColor, NSEvent, NSGraphicsContext, NSRectFill, NSTrackingArea,
+    NSApplication, NSColor, NSEvent, NSGraphicsContext, NSRectFill, NSTrackingArea,
     NSTrackingAreaOptions, NSView,
 };
 use objc2_foundation::{NSPoint, NSRect};
@@ -878,10 +878,10 @@ impl BarView {
             let module_bounds = (positioned.x, 0.0, positioned.width, bar_height);
             let is_module_hovering = state
                 .mouse_position
-                .map_or(false, |p| positioned.contains_point(p.x));
+                .is_some_and(|p| positioned.contains_point(p.x));
             let is_module_pressed = state
                 .pressed_module_x
-                .map_or(false, |px| (px - positioned.x).abs() < 0.1);
+                .is_some_and(|px| (px - positioned.x).abs() < 0.1);
 
             // Skip individual background if part of a group (unless toggle is active or pressed)
             let in_group = positioned.group.is_some()

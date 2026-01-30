@@ -11,9 +11,9 @@ mod title;
 
 pub use box_component::BoxComponent;
 pub use columns::{Column, Columns};
-pub use skeleton::{Skeleton, SkeletonWidth};
+pub use skeleton::Skeleton;
 pub use text::Text;
-pub use title::{TextAlign, Title};
+pub use title::Title;
 
 use core_graphics::context::CGContext;
 

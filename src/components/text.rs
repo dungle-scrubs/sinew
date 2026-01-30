@@ -14,6 +14,7 @@ pub struct Text {
     pub font_size: Option<f64>,
 }
 
+#[allow(dead_code)]
 impl Text {
     /// Creates a new text component with the given content.
     ///

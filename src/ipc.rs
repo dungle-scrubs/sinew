@@ -108,7 +108,7 @@ impl IpcServer {
 
     fn parse_command(input: &str) -> IpcCommand {
         let parts: Vec<&str> = input.trim().splitn(3, ' ').collect();
-        match parts.get(0).map(|s| s.to_lowercase()).as_deref() {
+        match parts.first().map(|s| s.to_lowercase()).as_deref() {
             Some("redraw") => IpcCommand::Redraw,
             Some("reload") => IpcCommand::Reload,
             Some("status") => IpcCommand::Status,

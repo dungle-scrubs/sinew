@@ -1,6 +1,6 @@
 mod types;
 
-pub use types::{parse_hex_color, Config, ConfigIssue, ModuleConfig};
+pub use types::{parse_hex_color, Config, ModuleConfig};
 
 use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
 use std::path::PathBuf;

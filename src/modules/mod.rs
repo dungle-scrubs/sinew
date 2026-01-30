@@ -239,18 +239,13 @@ pub trait Module: Send + Sync {
 }
 
 /// Width sizing for a module
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub enum ModuleWidth {
     /// Fixed width - uses natural content width
+    #[default]
     Fixed,
     /// Flexible width - grows/shrinks to fill space
     Flex { min: f64, max: f64 },
-}
-
-impl Default for ModuleWidth {
-    fn default() -> Self {
-        ModuleWidth::Fixed
-    }
 }
 
 /// A positioned module within the bar

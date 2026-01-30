@@ -1,4 +1,4 @@
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, RwLock};
 
 use objc2::rc::Retained;
@@ -222,7 +222,7 @@ impl App {
         }
 
         // Create channel for click events from monitor to main loop
-        let (click_tx, click_rx) = mpsc::channel::<ClickEvent>();
+        let (_click_tx, click_rx) = mpsc::channel::<ClickEvent>();
 
         // Create mouse monitor if we have windows
         let mouse_monitor = if !window_bounds.is_empty() {
@@ -377,7 +377,7 @@ impl App {
         let should_close = self
             .popup
             .as_ref()
-            .map_or(false, |p| (p.module_x - info.module_x).abs() < 1.0);
+            .is_some_and(|p| (p.module_x - info.module_x).abs() < 1.0);
 
         log::info!(
             "=== popup check: should_close={}, popup_open={} ===",
@@ -738,7 +738,7 @@ impl App {
                     let mouse_loc = NSEvent::mouseLocation();
 
                     // Check if click is inside popup
-                    let in_popup = self.popup.as_ref().map_or(false, |p| {
+                    let in_popup = self.popup.as_ref().is_some_and(|p| {
                         let frame = p.window.window().frame();
                         mouse_loc.x >= frame.origin.x
                             && mouse_loc.x <= frame.origin.x + frame.size.width
@@ -747,7 +747,7 @@ impl App {
                     });
 
                     // Check if click is inside panel
-                    let in_panel = self.panel.as_ref().map_or(false, |p| {
+                    let in_panel = self.panel.as_ref().is_some_and(|p| {
                         if !p.is_visible() {
                             return false;
                         }

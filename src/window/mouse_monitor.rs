@@ -36,7 +36,7 @@ impl WindowBounds {
             && screen_y <= self.y + self.height
     }
 
-    pub fn to_local(&self, screen_x: f64, screen_y: f64) -> (f64, f64) {
+    pub fn to_local(self, screen_x: f64, screen_y: f64) -> (f64, f64) {
         (screen_x - self.x, screen_y - self.y)
     }
 }

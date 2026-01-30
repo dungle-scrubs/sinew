@@ -3,7 +3,7 @@
 use objc2::rc::Retained;
 use objc2::{define_class, msg_send, MainThreadMarker, MainThreadOnly};
 use objc2_app_kit::{NSColor, NSEvent, NSGraphicsContext, NSRectFill, NSView};
-use objc2_foundation::{NSPoint, NSRect, NSSize};
+use objc2_foundation::NSRect;
 use std::cell::RefCell;
 use std::collections::HashMap;
 

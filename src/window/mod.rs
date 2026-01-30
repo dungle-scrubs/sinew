@@ -7,7 +7,6 @@ pub mod screen;
 pub mod workspace_monitor;
 
 pub use bar_window::{BarWindow, WindowPosition};
-pub use click_monitor::{start_click_monitor, ClickMonitor};
 pub use mouse_monitor::{MouseEventKind, MouseMonitor, WindowBounds};
 pub use panel::Panel;
 pub use popup::PopupWindow;

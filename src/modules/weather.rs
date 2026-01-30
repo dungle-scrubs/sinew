@@ -131,26 +131,9 @@ fn fetch_weather(location: &str) -> WeatherState {
     }
 }
 
-fn weather_icon(condition: &str) -> String {
-    let condition_lower = condition.to_lowercase();
-    if condition_lower.contains("sun") || condition_lower.contains("clear") {
-        ""
-    } else if condition_lower.contains("cloud") || condition_lower.contains("overcast") {
-        ""
-    } else if condition_lower.contains("rain") || condition_lower.contains("drizzle") {
-        ""
-    } else if condition_lower.contains("snow") {
-        ""
-    } else if condition_lower.contains("thunder") || condition_lower.contains("storm") {
-        ""
-    } else if condition_lower.contains("fog") || condition_lower.contains("mist") {
-        ""
-    } else if condition_lower.contains("wind") {
-        ""
-    } else {
-        ""
-    }
-    .to_string()
+fn weather_icon(_condition: &str) -> String {
+    // TODO: Add weather icons based on condition
+    String::new()
 }
 
 impl Module for Weather {

@@ -1,3 +1,10 @@
+// Allow dead code for API methods/structs meant for future use
+#![allow(dead_code)]
+// Allow complex types in internal code
+#![allow(clippy::type_complexity)]
+// Allow functions with many arguments for now
+#![allow(clippy::too_many_arguments)]
+
 mod app;
 mod components;
 mod config;

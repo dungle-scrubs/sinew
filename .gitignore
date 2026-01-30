@@ -14,3 +14,18 @@ Cargo.lock
 
 # Logs
 *.log
+
+# Environment
+.env
+.env.local
+.env.*
+
+# AI coding assistants
+.claude/
+CLAUDE.md
+AGENT.md
+plan.md
+*-plan.md
+.cursorrules
+.cursor/
+copilot-instructions.md

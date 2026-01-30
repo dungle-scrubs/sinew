@@ -1,7 +1,15 @@
 [package]
 name = "rustybar"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
+description = "A macOS menu bar replacement with notch-aware split layouts and hot-reload configuration"
+authors = ["Kevin Frilot"]
+license = "MIT"
+repository = "https://github.com/dungle-scrubs/rustybar"
+homepage = "https://github.com/dungle-scrubs/rustybar"
+keywords = ["macos", "menubar", "statusbar", "appkit"]
+categories = ["gui"]
+readme = "README.md"
 
 [dependencies]
 objc2 = "0.6"
@@ -28,6 +36,7 @@ objc2-app-kit = { version = "0.3", features = [
     "NSGraphicsContext",
     "NSEvent",
     "NSTrackingArea",
+    "NSWorkspace",
 ] }
 block2 = "0.6"
 core-graphics = "0.24"

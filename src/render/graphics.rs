@@ -3,8 +3,38 @@ use core_foundation::string::CFString;
 use core_graphics::context::CGContext;
 use core_text::font::CTFont;
 use foreign_types::ForeignType;
+use std::cell::RefCell;
+use std::collections::HashMap;
 
 use crate::config::parse_hex_color;
+
+// Thread-local font cache to avoid expensive font loading on every draw
+thread_local! {
+    static FONT_CACHE: RefCell<HashMap<(String, u32), CTFont>> = RefCell::new(HashMap::new());
+}
+
+/// Gets a cached font or creates and caches a new one.
+fn get_cached_font(font_family: &str, font_size: f64) -> CTFont {
+    // Use size in hundredths for cache key (avoids float comparison issues)
+    let size_key = (font_size * 100.0) as u32;
+    let cache_key = (font_family.to_string(), size_key);
+
+    FONT_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if let Some(font) = cache.get(&cache_key) {
+            font.clone()
+        } else {
+            let font =
+                core_text::font::new_from_name(font_family, font_size).unwrap_or_else(|_| {
+                    log::warn!("Failed to load font '{}', using Helvetica", font_family);
+                    core_text::font::new_from_name("Helvetica", font_size)
+                        .expect("Failed to load fallback font")
+                });
+            cache.insert(cache_key, font.clone());
+            font
+        }
+    })
+}
 
 pub struct Graphics {
     background_color: (f64, f64, f64, f64),
@@ -16,12 +46,7 @@ impl Graphics {
     pub fn new(bg_color: &str, text_color: &str, font_family: &str, font_size: f64) -> Self {
         let background_color = parse_hex_color(bg_color).unwrap_or((0.1, 0.1, 0.15, 1.0));
         let text_color = parse_hex_color(text_color).unwrap_or((0.8, 0.85, 0.95, 1.0));
-
-        let font = core_text::font::new_from_name(font_family, font_size).unwrap_or_else(|_| {
-            log::warn!("Failed to load font '{}', using Helvetica", font_family);
-            core_text::font::new_from_name("Helvetica", font_size)
-                .expect("Failed to load fallback font")
-        });
+        let font = get_cached_font(font_family, font_size);
 
         Self {
             background_color,

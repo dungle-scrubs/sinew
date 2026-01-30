@@ -1,7 +1,7 @@
 use super::{Module, ModuleSize, RenderContext};
 use crate::render::Graphics;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Mutex;
 use std::time::Instant;
 
 pub struct Network {

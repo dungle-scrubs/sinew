@@ -1,7 +1,7 @@
 //! Panel view for full-width slide-down panels
 
 use objc2::rc::Retained;
-use objc2::{MainThreadMarker, MainThreadOnly, define_class, msg_send};
+use objc2::{define_class, msg_send, MainThreadMarker, MainThreadOnly};
 use objc2_app_kit::{NSColor, NSEvent, NSGraphicsContext, NSRectFill, NSView};
 use objc2_foundation::{NSPoint, NSRect, NSSize};
 use std::cell::RefCell;
@@ -18,6 +18,11 @@ struct PanelState {
     graphics: Graphics,
     scroll_offset: f64,
     content_height: f64,
+    // Border for connected effect
+    border_color: Option<(f64, f64, f64, f64)>,
+    border_width: f64,
+    // Background color
+    bg_color: (f64, f64, f64, f64),
 }
 
 #[derive(Clone)]
@@ -96,12 +101,23 @@ define_class!(
 
 impl PanelView {
     /// Create a new panel view and return the view along with its preferred content height
-    pub fn new(mtm: MainThreadMarker, content: PanelContent) -> (Retained<Self>, f64) {
+    pub fn new(
+        mtm: MainThreadMarker,
+        content: PanelContent,
+        border_color: Option<(f64, f64, f64, f64)>,
+        border_width: f64,
+        bg_color: &str,
+        text_color: &str,
+        font_family: &str,
+        font_size: f64,
+    ) -> (Retained<Self>, f64) {
         let view: Retained<Self> = unsafe { msg_send![Self::alloc(mtm), init] };
 
         let view_id = &*view as *const _ as usize;
 
-        let graphics = Graphics::new("#1a1b26", "#c8cdd5", "SF Pro", 14.0);
+        let graphics = Graphics::new(bg_color, text_color, font_family, font_size);
+        let parsed_bg =
+            crate::config::parse_hex_color(bg_color).unwrap_or((0.118, 0.118, 0.18, 1.0));
 
         let content_height = Self::calculate_content_height(&content);
 
@@ -110,6 +126,9 @@ impl PanelView {
             graphics,
             scroll_offset: 0.0,
             content_height,
+            border_color,
+            border_width,
+            bg_color: parsed_bg,
         };
 
         PANEL_STATES.with(|states| {
@@ -153,19 +172,11 @@ impl PanelView {
     fn draw_content(&self, state: &PanelState) {
         let bounds = self.bounds();
 
-        // Draw background - matches bar color (#1e1e2e)
-        let bg_color = NSColor::colorWithSRGBRed_green_blue_alpha(0.118, 0.118, 0.180, 1.0);
+        // Draw background
+        let (r, g, b, a) = state.bg_color;
+        let bg_color = NSColor::colorWithSRGBRed_green_blue_alpha(r, g, b, a);
         bg_color.set();
         NSRectFill(bounds);
-
-        // Draw subtle bottom border only (isFlipped, so bottom is at max y)
-        let border_color = NSColor::colorWithSRGBRed_green_blue_alpha(0.2, 0.2, 0.25, 0.8);
-        border_color.set();
-        let border_rect = NSRect::new(
-            NSPoint::new(0.0, bounds.size.height - 0.5),
-            NSSize::new(bounds.size.width, 0.5),
-        );
-        NSRectFill(border_rect);
 
         // Get graphics context
         let Some(ns_context) = NSGraphicsContext::currentContext() else {
@@ -215,6 +226,20 @@ impl PanelView {
         }
 
         ctx.restore();
+
+        // Draw bottom border (panel is full-width, so just a line)
+        // Note: isFlipped is true, so y increases downward
+        if let Some((r, g, b, a)) = state.border_color {
+            ctx.set_rgb_stroke_color(r, g, b, a);
+            ctx.set_line_width(state.border_width);
+
+            let y = bounds.size.height - state.border_width / 2.0;
+            ctx.begin_path();
+            ctx.move_to_point(0.0, y);
+            ctx.add_line_to_point(bounds.size.width, y);
+            ctx.stroke_path();
+        }
+
         std::mem::forget(ctx);
     }
 

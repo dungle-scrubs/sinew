@@ -1,10 +1,10 @@
 mod types;
 
-pub use types::{Config, ModuleConfig, parse_hex_color};
+pub use types::{parse_hex_color, Config, ModuleConfig};
 
 use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
 use std::path::PathBuf;
-use std::sync::mpsc::{Receiver, channel};
+use std::sync::mpsc::{channel, Receiver};
 use std::sync::{Arc, RwLock};
 
 pub type SharedConfig = Arc<RwLock<Config>>;

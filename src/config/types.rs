@@ -117,6 +117,17 @@ pub struct ModuleConfig {
     /// Show module while loading (true = show "Loading...", false = hidden until loaded)
     #[serde(default = "default_show_while_loading")]
     pub show_while_loading: bool,
+    /// Enable toggle behavior (on/off state)
+    #[serde(default)]
+    pub toggle: bool,
+    /// Toggle group ID for radio-button behavior (only one active in group)
+    pub toggle_group: Option<String>,
+    /// Background color when toggle is active
+    pub active_background: Option<String>,
+    /// Border color when toggle is active
+    pub active_border_color: Option<String>,
+    /// Text color when toggle is active
+    pub active_color: Option<String>,
 }
 
 fn default_show_while_loading() -> bool {
@@ -150,9 +161,31 @@ pub struct BarConfig {
     /// Font family
     #[serde(default = "default_font_family")]
     pub font_family: String,
+    /// Padding around the bar content (pixels)
+    #[serde(default = "default_bar_padding")]
+    pub padding: f64,
+    /// Enable hover effects (lightens module backgrounds on mouse over)
+    /// Disabling this reduces CPU usage by eliminating mouse position polling
+    #[serde(default = "default_hover_effects")]
+    pub hover_effects: bool,
+    /// Bottom border color (also used for popup borders)
+    pub border_color: Option<String>,
+    /// Border width in pixels
+    #[serde(default = "default_bar_border_width")]
+    pub border_width: f64,
+    /// Border corner radius (for connected popup effect)
+    #[serde(default)]
+    pub border_radius: f64,
     /// Notch configuration
     #[serde(default)]
     pub notch: NotchConfig,
+    /// Slide bar down when macOS menu bar appears (for auto-hide menu bar users)
+    #[serde(default)]
+    pub autohide: bool,
+    /// Popup/panel background color (defaults to bar background_color)
+    pub popup_background_color: Option<String>,
+    /// Popup/panel text color (defaults to bar text_color)
+    pub popup_text_color: Option<String>,
 }
 
 impl Default for BarConfig {
@@ -163,9 +196,29 @@ impl Default for BarConfig {
             text_color: default_text_color(),
             font_size: default_font_size(),
             font_family: default_font_family(),
+            padding: default_bar_padding(),
+            hover_effects: default_hover_effects(),
+            border_color: None,
+            border_width: default_bar_border_width(),
+            border_radius: 0.0,
             notch: NotchConfig::default(),
+            autohide: false,
+            popup_background_color: None,
+            popup_text_color: None,
         }
     }
+}
+
+fn default_bar_padding() -> f64 {
+    4.0
+}
+
+fn default_hover_effects() -> bool {
+    true
+}
+
+fn default_bar_border_width() -> f64 {
+    1.0
 }
 
 /// Configuration for the fake notch on external displays

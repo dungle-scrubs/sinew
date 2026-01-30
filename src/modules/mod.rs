@@ -135,6 +135,8 @@ pub struct PositionedModule {
     pub right_click_command: Option<String>,
     /// Group ID for shared backgrounds
     pub group: Option<String>,
+    /// Popup configuration
+    pub popup: Option<PopupConfig>,
 }
 
 impl PositionedModule {
@@ -157,6 +159,7 @@ impl PositionedModule {
             click_command: None,
             right_click_command: None,
             group: None,
+            popup: None,
         }
     }
 
@@ -170,6 +173,7 @@ impl PositionedModule {
         click_command: Option<String>,
         right_click_command: Option<String>,
         group: Option<String>,
+        popup: Option<PopupConfig>,
     ) -> Self {
         let size = module.measure();
         let alignment = match zone {
@@ -196,6 +200,7 @@ impl PositionedModule {
             click_command,
             right_click_command,
             group,
+            popup,
         }
     }
 
@@ -217,6 +222,7 @@ impl PositionedModule {
             click_command: None,
             right_click_command: None,
             group: None,
+            popup: None,
         }
     }
 
@@ -254,6 +260,19 @@ pub struct ModuleStyle {
     pub warning_threshold: f64,
 }
 
+/// Popup configuration for a module
+#[derive(Debug, Clone, Default)]
+pub struct PopupConfig {
+    /// Popup type: "calendar", "info", "script"
+    pub popup_type: Option<String>,
+    /// Popup width
+    pub width: f64,
+    /// Popup height
+    pub height: f64,
+    /// Command for script-type popup
+    pub command: Option<String>,
+}
+
 /// Result of creating a module from config
 pub struct CreatedModule {
     pub module: Box<dyn Module>,
@@ -264,6 +283,7 @@ pub struct CreatedModule {
     pub click_command: Option<String>,
     pub right_click_command: Option<String>,
     pub group: Option<String>,
+    pub popup: Option<PopupConfig>,
 }
 
 /// Create a module from config
@@ -369,6 +389,14 @@ pub fn create_module_from_config(
         warning_threshold: config.warning_threshold.unwrap_or(40.0),
     };
 
+    // Parse popup config if present
+    let popup = config.popup.as_ref().map(|popup_type| PopupConfig {
+        popup_type: Some(popup_type.clone()),
+        width: config.popup_width.unwrap_or(200.0),
+        height: config.popup_height.unwrap_or(150.0),
+        command: config.popup_command.clone(),
+    });
+
     module.map(|m| CreatedModule {
         module: m,
         flex: config.flex,
@@ -378,5 +406,6 @@ pub fn create_module_from_config(
         click_command: config.click_command.clone(),
         right_click_command: config.right_click_command.clone(),
         group: config.group.clone(),
+        popup,
     })
 }

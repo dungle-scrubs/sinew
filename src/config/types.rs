@@ -98,6 +98,14 @@ pub struct ModuleConfig {
     pub critical_threshold: Option<f64>,
     /// Threshold for warning state (percentage)
     pub warning_threshold: Option<f64>,
+    /// Popup type: "calendar", "info", "script"
+    pub popup: Option<String>,
+    /// Popup width in pixels
+    pub popup_width: Option<f64>,
+    /// Popup height in pixels
+    pub popup_height: Option<f64>,
+    /// Command to run for popup content (for "script" popup type)
+    pub popup_command: Option<String>,
 }
 
 impl Default for Config {

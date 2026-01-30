@@ -339,6 +339,7 @@ impl BarView {
                             created.click_command,
                             created.right_click_command,
                             created.group,
+                            created.popup,
                         ))
                     }).collect()
                 };
@@ -417,13 +418,8 @@ impl BarView {
             return;
         };
 
-        // Draw background - lighter when hovering
+        // Draw background
         let (r, g, b, a) = cache.bg_color;
-        let (r, g, b) = if state.is_hovering {
-            (r + 0.08, g + 0.08, b + 0.08)
-        } else {
-            (r, g, b)
-        };
         let bg_color = NSColor::colorWithSRGBRed_green_blue_alpha(r, g, b, a);
         bg_color.set();
         NSRectFill(bounds);
@@ -706,20 +702,31 @@ pub fn set_hover_state(window: &objc2_app_kit::NSWindow, is_hovering: bool) {
     }
 }
 
+/// Info about a popup to show
+pub struct PopupInfo {
+    pub popup_type: String,
+    pub width: f64,
+    pub height: f64,
+    pub command: Option<String>,
+    pub module_x: f64,
+    pub module_width: f64,
+}
+
 /// Handle mouse events from the global mouse monitor
+/// Returns PopupInfo if a module with popup config was clicked
 pub fn handle_mouse_event(
     view_id: usize,
     event: crate::window::MouseEventKind,
     x: f64,
     y: f64,
     _config: &crate::config::SharedConfig,
-) {
+) -> Option<PopupInfo> {
     use crate::window::MouseEventKind;
 
     // Get click/right-click command for the module at this position
     let mut click_command: Option<String> = None;
     let mut right_click_command: Option<String> = None;
-    let mut is_over_module = false;
+    let mut popup_info: Option<PopupInfo> = None;
 
     VIEW_STATES.with(|states| {
         if let Some(state) = states.borrow_mut().get_mut(&view_id) {
@@ -738,16 +745,28 @@ pub fn handle_mouse_event(
                 _ => {}
             }
 
-            // Check if over a clickable module and get commands
+            // Check if over a clickable module and get commands/popup
             if let Some(cache) = &state.cache {
                 for positioned in &cache.modules {
                     if positioned.contains_point(x) {
-                        is_over_module = true;
                         if let Some(ref cmd) = positioned.click_command {
                             click_command = Some(cmd.clone());
                         }
                         if let Some(ref cmd) = positioned.right_click_command {
                             right_click_command = Some(cmd.clone());
+                        }
+                        // Check for popup config
+                        if let Some(ref popup) = positioned.popup {
+                            if let Some(ref popup_type) = popup.popup_type {
+                                popup_info = Some(PopupInfo {
+                                    popup_type: popup_type.clone(),
+                                    width: popup.width,
+                                    height: popup.height,
+                                    command: popup.command.clone(),
+                                    module_x: positioned.x,
+                                    module_width: positioned.width,
+                                });
+                            }
                         }
                         break;
                     }
@@ -755,11 +774,6 @@ pub fn handle_mouse_event(
             }
         }
     });
-
-    // NOTE: Cursor handling disabled - it was affecting the system cursor globally
-    // and causing flickering. For an Accessory app, cursor changes don't work well.
-    // The bar is still fully interactive without cursor changes.
-    let _ = is_over_module; // Suppress unused warning
 
     // Execute commands on click
     match event {
@@ -772,6 +786,13 @@ pub fn handle_mouse_event(
                         .spawn();
                 });
             }
+            // Return popup info on left click
+            if let Some(ref info) = popup_info {
+                log::debug!("Returning popup_info: type={}, x={}, width={}", info.popup_type, info.module_x, info.module_width);
+            } else {
+                log::debug!("No popup_info to return");
+            }
+            return popup_info;
         }
         MouseEventKind::RightUp => {
             if let Some(cmd) = right_click_command {
@@ -785,4 +806,6 @@ pub fn handle_mouse_event(
         }
         _ => {}
     }
+
+    None
 }

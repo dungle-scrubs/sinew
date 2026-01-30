@@ -10,7 +10,11 @@ use crate::config::{load_config, ConfigWatcher, SharedConfig};
 use crate::view::PopupInfo;
 use chrono::Datelike;
 
-use crate::components::{BoxComponent, Column, Columns, Component, Skeleton, Text, Title};
+use crate::components::{
+    Badge, BoxComponent, BulletList, BulletStyle, Callout, Code, CodeBlock, Column, Columns,
+    Component, Divider, Heading, Link, NumberStyle, NumberedList, Paragraph, Skeleton, Spacer,
+    Stack, Text,
+};
 use crate::view::{
     bump_config_version, init_click_channel, BarView, PanelContent, PanelView, PopupContent,
     PopupView, ViewClickEvent,
@@ -344,7 +348,12 @@ impl App {
                     font_size,
                 );
 
-                let max_height = self.screen_height * 0.5;
+                // Demo panels get 75% height for showcasing components
+                let max_height = if info.popup_type == "demo" {
+                    self.screen_height * 0.75
+                } else {
+                    self.screen_height * 0.5
+                };
                 let mut panel = Panel::new(
                     mtm,
                     self.screen_width,
@@ -784,96 +793,242 @@ impl App {
 /// Creates demo panel content showcasing all component types.
 fn create_demo_panel_content() -> PanelContent {
     let components: Vec<Box<dyn Component>> = vec![
-        // Title component
-        Box::new(Title::new("Component System Demo").font_size(20.0)),
-        // Spacer using skeleton with 0 height (acts as vertical space)
-        Box::new(Skeleton::new().fill().height(16.0).corner_radius(0.0)),
-        // Text component
-        Box::new(Text::new(
-            "This panel demonstrates all available components.",
+        // ===== Typography Section =====
+        Box::new(Heading::h1("Component System")),
+        Box::new(Spacer::sm()),
+        Box::new(Paragraph::muted(
+            "A shadcn-style component library for RustyBar",
         )),
-        Box::new(Skeleton::new().fill().height(8.0).corner_radius(0.0)),
-        // Box with text inside
+        Box::new(Spacer::lg()),
+        // ===== Headings =====
+        Box::new(Heading::h2("Typography")),
+        Box::new(Spacer::sm()),
+        Box::new(Heading::h3("Heading Levels")),
+        Box::new(Spacer::xs()),
+        Box::new(Paragraph::new(
+            "Headings use a 1.25 modular scale from h6 to h1",
+        )),
+        Box::new(Spacer::sm()),
+        Box::new(Heading::h4("This is h4 (1.25x)")),
+        Box::new(Heading::h5("This is h5 (1.125x)")),
+        Box::new(Heading::h6("This is h6 (1.0x base)")),
+        Box::new(Spacer::md()),
+        // Paragraph and Text
+        Box::new(Heading::h3("Text Styles")),
+        Box::new(Spacer::xs()),
+        Box::new(Paragraph::new("Regular paragraph text for body content.")),
+        Box::new(Paragraph::small(
+            "Small/muted text for secondary information",
+        )),
+        Box::new(Spacer::sm()),
         Box::new(
-            BoxComponent::new()
-                .background("#2a2a3a")
-                .border_color("#4a4a5a")
-                .border_width(1.0)
-                .corner_radius(8.0)
-                .padding(12.0)
-                .child(Text::new(
-                    "This is a BoxComponent with background, border, and padding.",
-                )),
+            Stack::horizontal()
+                .gap(8.0)
+                .child(Text::new("Inline text with"))
+                .child(Code::new("inline code"))
+                .child(Text::new("styling")),
         ),
-        Box::new(Skeleton::new().fill().height(16.0).corner_radius(0.0)),
-        // Skeleton loading placeholders
-        Box::new(Title::new("Skeleton Components").font_size(16.0)),
-        Box::new(Skeleton::new().fill().height(8.0).corner_radius(0.0)),
-        Box::new(Skeleton::new().width(200.0).height(20.0)),
-        Box::new(Skeleton::new().fill().height(4.0).corner_radius(0.0)),
-        Box::new(Skeleton::new().fill().height(16.0)),
-        Box::new(Skeleton::new().fill().height(4.0).corner_radius(0.0)),
-        Box::new(Skeleton::new().width(150.0).height(20.0)),
-        Box::new(Skeleton::new().fill().height(16.0).corner_radius(0.0)),
-        // Columns layout
-        Box::new(Title::new("Columns Layout").font_size(16.0)),
-        Box::new(Skeleton::new().fill().height(8.0).corner_radius(0.0)),
+        Box::new(Spacer::sm()),
+        Box::new(Link::new("This is a styled link (visual only)")),
+        Box::new(Spacer::md()),
+        // Code Block
+        Box::new(Heading::h3("Code Block")),
+        Box::new(Spacer::xs()),
+        Box::new(CodeBlock::new(
+            "fn main() {\n    println!(\"Hello, RustyBar!\");\n}",
+        )),
+        Box::new(Spacer::lg()),
+        Box::new(Divider::horizontal()),
+        Box::new(Spacer::md()),
+        // ===== Callouts Section =====
+        Box::new(Heading::h2("Callouts")),
+        Box::new(Spacer::sm()),
+        Box::new(
+            Callout::default_variant()
+                .title("Default Callout")
+                .child(Text::new("A neutral callout for general information.")),
+        ),
+        Box::new(Spacer::sm()),
+        Box::new(
+            Callout::info()
+                .title("Info")
+                .child(Text::new("Informational message using accent color.")),
+        ),
+        Box::new(Spacer::sm()),
+        Box::new(
+            Callout::success()
+                .title("Success")
+                .child(Text::new("All systems operational.")),
+        ),
+        Box::new(Spacer::sm()),
+        Box::new(
+            Callout::warning()
+                .title("Warning")
+                .child(Text::new("Please review before proceeding.")),
+        ),
+        Box::new(Spacer::sm()),
+        Box::new(
+            Callout::destructive()
+                .title("Error")
+                .child(Text::new("Something went wrong.")),
+        ),
+        Box::new(Spacer::lg()),
+        Box::new(Divider::horizontal()),
+        Box::new(Spacer::md()),
+        // ===== Badges Section =====
+        Box::new(Heading::h2("Badges")),
+        Box::new(Spacer::sm()),
+        Box::new(
+            Stack::horizontal()
+                .gap(8.0)
+                .child(Badge::default_variant("Default"))
+                .child(Badge::outline("Outline"))
+                .child(Badge::accent("Accent"))
+                .child(Badge::success("Success"))
+                .child(Badge::destructive("Error")),
+        ),
+        Box::new(Spacer::sm()),
+        Box::new(
+            Stack::horizontal()
+                .gap(8.0)
+                .child(Badge::success("v0.1.0").pill())
+                .child(Badge::accent("New").pill())
+                .child(Badge::outline("Beta").pill()),
+        ),
+        Box::new(Spacer::lg()),
+        Box::new(Divider::horizontal()),
+        Box::new(Spacer::md()),
+        // ===== Lists Section =====
+        Box::new(Heading::h2("Lists")),
+        Box::new(Spacer::sm()),
         Box::new(
             Columns::new()
-                .gap(20.0)
+                .gap(40.0)
                 .column(
                     Column::equal()
+                        .child(Heading::h4("Bullet List"))
+                        .child(Spacer::xs())
                         .child(
-                            BoxComponent::new()
-                                .background("#3a2a4a")
-                                .corner_radius(6.0)
-                                .padding(10.0)
-                                .child(Text::new("Column 1")),
+                            BulletList::new()
+                                .text_item("First item")
+                                .text_item("Second item")
+                                .text_item("Third item"),
                         )
-                        .child(Text::new("Left column content")),
+                        .child(Spacer::sm())
+                        .child(Heading::h4("Arrow Bullets"))
+                        .child(Spacer::xs())
+                        .child(
+                            BulletList::new()
+                                .style(BulletStyle::Arrow)
+                                .text_item("Arrow style")
+                                .text_item("Another point"),
+                        ),
                 )
                 .column(
                     Column::equal()
+                        .child(Heading::h4("Numbered List"))
+                        .child(Spacer::xs())
                         .child(
-                            BoxComponent::new()
-                                .background("#2a4a3a")
-                                .corner_radius(6.0)
-                                .padding(10.0)
-                                .child(Text::new("Column 2")),
+                            NumberedList::new()
+                                .text_item("Step one")
+                                .text_item("Step two")
+                                .text_item("Step three"),
                         )
-                        .child(Text::new("Middle column")),
-                )
-                .column(
-                    Column::equal()
+                        .child(Spacer::sm())
+                        .child(Heading::h4("Roman Numerals"))
+                        .child(Spacer::xs())
                         .child(
-                            BoxComponent::new()
-                                .background("#4a3a2a")
-                                .corner_radius(6.0)
-                                .padding(10.0)
-                                .child(Text::new("Column 3")),
-                        )
-                        .child(Text::new("Right column")),
+                            NumberedList::new()
+                                .style(NumberStyle::LowerRoman)
+                                .text_item("Roman one")
+                                .text_item("Roman two"),
+                        ),
                 ),
         ),
-        Box::new(Skeleton::new().fill().height(16.0).corner_radius(0.0)),
-        // Nested boxes
-        Box::new(Title::new("Nested Components").font_size(16.0)),
-        Box::new(Skeleton::new().fill().height(8.0).corner_radius(0.0)),
+        Box::new(Spacer::lg()),
+        Box::new(Divider::horizontal()),
+        Box::new(Spacer::md()),
+        // ===== Layout Section =====
+        Box::new(Heading::h2("Layout")),
+        Box::new(Spacer::sm()),
+        Box::new(Heading::h3("Stack (Horizontal)")),
+        Box::new(Spacer::xs()),
         Box::new(
-            BoxComponent::new()
-                .background("#1e1e2e")
-                .border_color("#6a6a7a")
-                .border_width(2.0)
-                .corner_radius(12.0)
-                .padding(16.0)
+            Stack::horizontal()
+                .gap(12.0)
+                .center()
                 .child(
                     BoxComponent::new()
-                        .background("#2e2e3e")
-                        .corner_radius(8.0)
-                        .padding(12.0)
-                        .child(Text::new("Nested box inside another box")),
+                        .background("#313244")
+                        .corner_radius(4.0)
+                        .padding(8.0)
+                        .child(Text::new("Item 1")),
+                )
+                .child(
+                    BoxComponent::new()
+                        .background("#313244")
+                        .corner_radius(4.0)
+                        .padding(8.0)
+                        .child(Text::new("Item 2")),
+                )
+                .child(
+                    BoxComponent::new()
+                        .background("#313244")
+                        .corner_radius(4.0)
+                        .padding(8.0)
+                        .child(Text::new("Item 3")),
                 ),
         ),
+        Box::new(Spacer::md()),
+        Box::new(Heading::h3("Columns")),
+        Box::new(Spacer::xs()),
+        Box::new(
+            Columns::new()
+                .gap(16.0)
+                .column(
+                    Column::equal().child(
+                        BoxComponent::new()
+                            .background("#45475a")
+                            .corner_radius(6.0)
+                            .padding(12.0)
+                            .child(Text::new("Column A")),
+                    ),
+                )
+                .column(
+                    Column::equal().child(
+                        BoxComponent::new()
+                            .background("#45475a")
+                            .corner_radius(6.0)
+                            .padding(12.0)
+                            .child(Text::new("Column B")),
+                    ),
+                )
+                .column(
+                    Column::equal().child(
+                        BoxComponent::new()
+                            .background("#45475a")
+                            .corner_radius(6.0)
+                            .padding(12.0)
+                            .child(Text::new("Column C")),
+                    ),
+                ),
+        ),
+        Box::new(Spacer::lg()),
+        Box::new(Divider::horizontal()),
+        Box::new(Spacer::md()),
+        // ===== Skeleton Section =====
+        Box::new(Heading::h2("Skeleton Loaders")),
+        Box::new(Spacer::sm()),
+        Box::new(Skeleton::new().width(200.0).height(20.0)),
+        Box::new(Spacer::xs()),
+        Box::new(Skeleton::new().fill().height(16.0)),
+        Box::new(Spacer::xs()),
+        Box::new(Skeleton::new().width(150.0).height(20.0)),
+        Box::new(Spacer::lg()),
+        // ===== Footer =====
+        Box::new(Divider::horizontal()),
+        Box::new(Spacer::sm()),
+        Box::new(Paragraph::muted("Built with the RustyBar component system")),
     ];
 
     PanelContent::Components(components)

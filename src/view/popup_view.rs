@@ -11,6 +11,8 @@ use objc2_foundation::NSRect;
 use std::cell::RefCell;
 use std::collections::HashMap;
 
+use crate::components::Theme;
+use crate::config::ThemeConfig;
 use crate::render::Graphics;
 
 // Thread-local storage for popup view states.
@@ -37,6 +39,10 @@ struct PopupState {
     top_extension: f64,
     /// Background color (RGBA)
     bg_color: (f64, f64, f64, f64),
+    /// Theme for components
+    theme: Theme,
+    /// Cached component sizes (avoid re-measuring on every scroll)
+    component_sizes: Vec<crate::components::ComponentSize>,
 }
 
 /// Content types that can be displayed in a popup.
@@ -130,6 +136,33 @@ impl PopupView {
         font_family: &str,
         font_size: f64,
     ) -> (Retained<Self>, f64) {
+        Self::new_with_theme(
+            mtm,
+            content,
+            border_color,
+            border_width,
+            top_extension,
+            bg_color,
+            text_color,
+            font_family,
+            font_size,
+            &ThemeConfig::default(),
+        )
+    }
+
+    /// Creates a new popup view with theme support.
+    pub fn new_with_theme(
+        mtm: MainThreadMarker,
+        content: PopupContent,
+        border_color: Option<(f64, f64, f64, f64)>,
+        border_width: f64,
+        top_extension: f64,
+        bg_color: &str,
+        text_color: &str,
+        font_family: &str,
+        font_size: f64,
+        theme_config: &ThemeConfig,
+    ) -> (Retained<Self>, f64) {
         let view: Retained<Self> = unsafe { msg_send![Self::alloc(mtm), init] };
 
         let view_id = &*view as *const _ as usize;
@@ -138,7 +171,11 @@ impl PopupView {
         let parsed_bg =
             crate::config::parse_hex_color(bg_color).unwrap_or((0.118, 0.118, 0.18, 1.0));
 
-        let content_height = Self::calculate_content_height(&content);
+        let theme = Theme::from_config(theme_config, text_color, bg_color, font_family, font_size);
+
+        // Pre-calculate component sizes to avoid expensive re-measurement on scroll
+        let (content_height, component_sizes) =
+            Self::calculate_content_height_and_sizes(&content, &theme);
 
         let state = PopupState {
             content,
@@ -149,6 +186,8 @@ impl PopupView {
             border_width,
             top_extension,
             bg_color: parsed_bg,
+            theme,
+            component_sizes,
         };
 
         POPUP_STATES.with(|states| {
@@ -169,26 +208,48 @@ impl PopupView {
     /// # Returns
     /// The height in points required to display all content
     fn calculate_content_height(content: &PopupContent) -> f64 {
+        Self::calculate_content_height_with_theme(content, &Theme::default())
+    }
+
+    /// Calculates content height with theme support.
+    fn calculate_content_height_with_theme(content: &PopupContent, theme: &Theme) -> f64 {
+        Self::calculate_content_height_and_sizes(content, theme).0
+    }
+
+    /// Calculate content height and cache component sizes (for scroll performance)
+    fn calculate_content_height_and_sizes(
+        content: &PopupContent,
+        theme: &Theme,
+    ) -> (f64, Vec<crate::components::ComponentSize>) {
         let padding = 12.0;
         let line_height = 20.0;
 
         match content {
-            PopupContent::Text(lines) => padding * 2.0 + (lines.len() as f64) * line_height,
-            PopupContent::Info(pairs) => padding * 2.0 + (pairs.len() as f64) * line_height,
-            PopupContent::Calendar { .. } => 200.0,
-            PopupContent::Loading => 50.0,
+            PopupContent::Text(lines) => (
+                padding * 2.0 + (lines.len() as f64) * line_height,
+                Vec::new(),
+            ),
+            PopupContent::Info(pairs) => (
+                padding * 2.0 + (pairs.len() as f64) * line_height,
+                Vec::new(),
+            ),
+            PopupContent::Calendar { .. } => (200.0, Vec::new()),
+            PopupContent::Loading => (50.0, Vec::new()),
             PopupContent::Components(components) => {
-                // Estimate height based on components
                 let measure_ctx = crate::components::MeasureContext {
-                    max_width: 200.0, // Default popup width
-                    font_family: "SF Pro",
-                    font_size: 13.0,
+                    max_width: 200.0,
+                    font_family: &theme.font_family,
+                    font_size: theme.font_size,
+                    theme: Some(theme),
                 };
                 let mut total_height = padding * 2.0;
+                let mut sizes = Vec::with_capacity(components.len());
                 for component in components {
-                    total_height += component.measure(&measure_ctx).height;
+                    let size = component.measure(&measure_ctx);
+                    total_height += size.height;
+                    sizes.push(size);
                 }
-                total_height
+                (total_height, sizes)
             }
         }
     }
@@ -301,16 +362,17 @@ impl PopupView {
                 let mut y = top_ext + padding - scroll_offset;
                 let available_width = bounds.size.width - padding * 2.0;
 
-                // Get text color from graphics (default to light gray)
-                let text_color = (0.8, 0.85, 0.95, 1.0);
+                // Use theme text color
+                let text_color = state.theme.text;
 
-                for component in components {
-                    let measure_ctx = crate::components::MeasureContext {
-                        max_width: available_width,
-                        font_family: "SF Pro",
-                        font_size: 13.0,
-                    };
-                    let size = component.measure(&measure_ctx);
+                // Use cached sizes instead of re-measuring on every scroll
+                for (i, component) in components.iter().enumerate() {
+                    let size = state.component_sizes.get(i).copied().unwrap_or(
+                        crate::components::ComponentSize {
+                            width: available_width,
+                            height: 20.0,
+                        },
+                    );
 
                     if y + size.height > top_ext && y < bounds.size.height {
                         let mut draw_ctx = crate::components::DrawContext {
@@ -319,9 +381,10 @@ impl PopupView {
                             y,
                             width: available_width,
                             height: size.height,
-                            font_family: "SF Pro",
-                            font_size: 13.0,
+                            font_family: &state.theme.font_family,
+                            font_size: state.theme.font_size,
                             text_color,
+                            theme: Some(&state.theme),
                         };
                         component.draw(&mut draw_ctx);
                     }

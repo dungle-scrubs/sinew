@@ -29,6 +29,7 @@ pub struct App {
     // Store screen info for panel creation
     bar_y: f64,
     screen_width: f64,
+    screen_height: f64,
 }
 
 struct ActivePopup {
@@ -63,7 +64,7 @@ impl App {
         let (windows, views, mouse_monitor, screen_info) = Self::create_windows(mtm, &config);
 
         // Extract screen dimensions for panel
-        let (bar_y, screen_width) = screen_info.unwrap_or((0.0, 0.0));
+        let (bar_y, screen_width, screen_height) = screen_info.unwrap_or((0.0, 0.0, 0.0));
 
         Self {
             _app: app,
@@ -77,6 +78,7 @@ impl App {
             panel_view: None,
             bar_y,
             screen_width,
+            screen_height,
         }
     }
 
@@ -87,12 +89,12 @@ impl App {
         Vec<BarWindow>,
         Vec<Retained<BarView>>,
         Option<MouseMonitor>,
-        Option<(f64, f64)>,
+        Option<(f64, f64, f64)>, // bar_y, screen_width, screen_height
     ) {
         let mut windows = Vec::new();
         let mut views = Vec::new();
         let mut window_bounds = Vec::new();
-        let mut screen_dimensions: Option<(f64, f64)> = None;
+        let mut screen_dimensions: Option<(f64, f64, f64)> = None;
 
         let height = config
             .read()
@@ -115,7 +117,7 @@ impl App {
             );
 
             // Store screen dimensions for panel creation
-            screen_dimensions = Some((window_y, screen_width));
+            screen_dimensions = Some((window_y, screen_width, screen_height));
 
             if screen_info.has_notch {
                 let left_window = BarWindow::new(mtm, &screen_info, WindowPosition::Left, height);
@@ -372,21 +374,29 @@ impl App {
                                 if let Some(ref mut panel) = self.panel {
                                     panel.toggle();
                                 } else {
-                                    // Create the panel lazily
-                                    let panel_height = 300.0;
+                                    // Create panel content with just a few lines for testing auto-height
+                                    let test_lines: Vec<String> = vec![
+                                        "Line 1: Testing auto-height".to_string(),
+                                        "Line 2: Panel should shrink to fit".to_string(),
+                                        "Line 3: No scrolling needed".to_string(),
+                                    ];
+
+                                    // Create panel view and get its content height
+                                    let (panel_view, content_height) =
+                                        PanelView::new(mtm, PanelContent::Text(test_lines));
+
+                                    // Max height is 50% of screen height
+                                    let max_height = self.screen_height * 0.5;
+
+                                    // Create the panel with dynamic height
                                     let mut panel = Panel::new(
                                         mtm,
                                         self.screen_width,
                                         self.bar_y,
-                                        panel_height,
+                                        content_height,
+                                        max_height,
                                     );
 
-                                    // Create panel content with scrollable text for testing
-                                    let test_lines: Vec<String> = (1..=50)
-                                        .map(|i| format!("Line {}: This is scrollable content in the full-width panel. Scroll with your trackpad or mouse wheel.", i))
-                                        .collect();
-                                    let panel_view =
-                                        PanelView::new(mtm, PanelContent::Text(test_lines));
                                     panel.set_content_view(&panel_view);
                                     panel.show();
                                     // Make the view first responder to receive scroll events
@@ -422,14 +432,7 @@ impl App {
                                     popup.window.hide();
                                 }
 
-                                // Create and show new popup
-                                let window_frame = self.windows[idx].window.frame();
-                                let popup_x =
-                                    window_frame.origin.x + info.module_x + info.module_width / 2.0;
-                                let popup_y = window_frame.origin.y; // Below the bar
-
-                                let popup_window = PopupWindow::new(mtm, info.width, info.height);
-
+                                // Create popup content first to get its height
                                 let content = match info.popup_type.as_str() {
                                     "calendar" => {
                                         let now = chrono::Local::now();
@@ -459,15 +462,49 @@ impl App {
                                             ])
                                         }
                                     }
-                                    _ => PopupContent::Text(vec![format!(
-                                        "Popup type: {}",
-                                        info.popup_type
-                                    )]),
+                                    _ => PopupContent::Text(vec![
+                                        format!("Popup type: {}", info.popup_type),
+                                        "Line 2: Testing auto-height".to_string(),
+                                        "Line 3: Should shrink to fit".to_string(),
+                                    ]),
                                 };
 
-                                let popup_view = PopupView::new(mtm, content);
+                                // Create popup view and get its content height
+                                let (popup_view, content_height) = PopupView::new(mtm, content);
+
+                                // Calculate available space (from bar bottom to screen bottom)
+                                // bar_y is the y position of the bar, which equals the available space
+                                let available_space = self.bar_y;
+                                let max_height =
+                                    available_space * (info.max_height_percent / 100.0);
+
+                                // Create popup with dynamic height
+                                let popup_window =
+                                    PopupWindow::new(mtm, info.width, content_height, max_height);
                                 popup_window.window().setContentView(Some(&popup_view));
-                                popup_window.show_at(popup_x, popup_y);
+
+                                // Position popup based on anchor setting
+                                let window_frame = self.windows[idx].window.frame();
+                                let module_left = window_frame.origin.x + info.module_x;
+                                let module_center = module_left + info.module_width / 2.0;
+                                let module_right = module_left + info.module_width;
+                                let popup_width = info.width;
+
+                                // Calculate desired center_x based on anchor
+                                use crate::modules::PopupAnchor;
+                                let desired_center_x = match info.anchor {
+                                    PopupAnchor::Left => module_left + popup_width / 2.0,
+                                    PopupAnchor::Center => module_center,
+                                    PopupAnchor::Right => module_right - popup_width / 2.0,
+                                };
+
+                                // Constrain to screen bounds
+                                let min_center_x = popup_width / 2.0;
+                                let max_center_x = self.screen_width - popup_width / 2.0;
+                                let popup_x = desired_center_x.clamp(min_center_x, max_center_x);
+
+                                popup_window.show_at(popup_x, self.bar_y);
+
                                 // Make the view first responder to receive scroll events
                                 popup_window.window().makeFirstResponder(Some(&*popup_view));
 

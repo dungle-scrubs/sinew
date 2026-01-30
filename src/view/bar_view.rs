@@ -752,9 +752,13 @@ pub struct PopupInfo {
     pub popup_type: String,
     pub width: f64,
     pub height: f64,
+    /// Maximum height as percentage of available space (0-100)
+    pub max_height_percent: f64,
     pub command: Option<String>,
     pub module_x: f64,
     pub module_width: f64,
+    /// Popup anchor position
+    pub anchor: crate::modules::PopupAnchor,
 }
 
 /// Handle mouse events from the global mouse monitor
@@ -807,9 +811,11 @@ pub fn handle_mouse_event(
                                     popup_type: popup_type.clone(),
                                     width: popup.width,
                                     height: popup.height,
+                                    max_height_percent: popup.max_height_percent,
                                     command: popup.command.clone(),
                                     module_x: positioned.x,
                                     module_width: positioned.width,
+                                    anchor: popup.anchor,
                                 });
                             }
                         }

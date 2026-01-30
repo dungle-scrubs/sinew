@@ -10,10 +10,11 @@ use objc2_app_kit::{NSEvent, NSEventMask, NSEventType};
 use objc2_foundation::NSPoint;
 use std::sync::{Arc, Mutex};
 
-/// A global mouse event monitor
+/// A global and local mouse event monitor
 pub struct MouseMonitor {
-    // Keep the monitor object alive
+    // Keep the monitor objects alive
     _global_monitor: Retained<AnyObject>,
+    _local_monitor: Option<Retained<AnyObject>>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -78,10 +79,17 @@ impl MouseMonitor {
         let last_window_clone = last_window.clone();
 
         let global_handler = block2::RcBlock::new(move |event: &NSEvent| {
+            let event_type = event.r#type();
+            if matches!(
+                event_type,
+                NSEventType::LeftMouseDown | NSEventType::LeftMouseUp
+            ) {
+                log::info!("GLOBAL BLOCK INVOKED: type={:?}", event_type);
+            }
             Self::handle_event(event, &windows_clone, &callback_clone, &last_window_clone);
         });
 
-        // Add the global monitor
+        // Add the global monitor (catches events going to other apps)
         let global_monitor: Option<Retained<AnyObject>> = unsafe {
             msg_send![
                 NSEvent::class(),
@@ -90,11 +98,21 @@ impl MouseMonitor {
             ]
         };
 
+        // NOTE: We intentionally don't use a local event monitor.
+        // When rustybar becomes the frontmost app (which can happen unexpectedly),
+        // the local monitor captures ALL clicks and prevents them from reaching other apps.
+        // The NSView's native mouseDown/mouseUp handlers + global monitor are sufficient.
+        let local_monitor: Option<Retained<AnyObject>> = None;
+
         match global_monitor {
             Some(global) => {
-                log::info!("Mouse monitor started (global)");
+                log::info!(
+                    "Mouse monitor started (global + local={})",
+                    local_monitor.is_some()
+                );
                 Some(Self {
                     _global_monitor: global,
+                    _local_monitor: local_monitor,
                 })
             }
             None => {
@@ -115,12 +133,25 @@ impl MouseMonitor {
         let screen_location: NSPoint = event.locationInWindow();
 
         let event_type = event.r#type();
-        log::trace!(
-            "Global mouse event: type={:?}, screen=({:.1}, {:.1})",
+        // Log click events at info level
+        if matches!(
             event_type,
-            screen_location.x,
-            screen_location.y
-        );
+            NSEventType::LeftMouseDown | NSEventType::LeftMouseUp
+        ) {
+            log::info!(
+                "GLOBAL mouse event: type={:?}, screen=({:.1}, {:.1})",
+                event_type,
+                screen_location.x,
+                screen_location.y
+            );
+        } else {
+            log::trace!(
+                "Global mouse event: type={:?}, screen=({:.1}, {:.1})",
+                event_type,
+                screen_location.x,
+                screen_location.y
+            );
+        }
 
         // Find which window (if any) contains this point
         let mut found_window: Option<(usize, f64, f64)> = None;
@@ -187,12 +218,18 @@ impl MouseMonitor {
 
 impl Drop for MouseMonitor {
     fn drop(&mut self) {
-        // Remove the monitor
+        // Remove the monitors
         unsafe {
             let _: () = msg_send![
                 NSEvent::class(),
                 removeMonitor: &*self._global_monitor
             ];
+            if let Some(ref local) = self._local_monitor {
+                let _: () = msg_send![
+                    NSEvent::class(),
+                    removeMonitor: &**local
+                ];
+            }
         }
         log::info!("Mouse monitor stopped");
     }

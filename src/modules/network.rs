@@ -1,11 +1,10 @@
-use super::{Module, ModuleSize, RenderContext};
-use crate::render::Graphics;
+use super::{LabelAlign, LabeledGraphics, Module, ModuleSize, RenderContext};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::Instant;
 
 pub struct Network {
-    graphics: Graphics,
+    graphics: LabeledGraphics,
     last_rx: AtomicU64,
     last_tx: AtomicU64,
     last_update: Mutex<Option<Instant>>,
@@ -14,8 +13,22 @@ pub struct Network {
 }
 
 impl Network {
-    pub fn new(font_family: &str, font_size: f64, text_color: &str) -> Self {
-        let graphics = Graphics::new("#000000", text_color, font_family, font_size);
+    pub fn new(
+        font_family: &str,
+        font_size: f64,
+        text_color: &str,
+        label: Option<&str>,
+        label_font_size: Option<f64>,
+        label_align: LabelAlign,
+    ) -> Self {
+        let graphics = LabeledGraphics::new(
+            font_family,
+            font_size,
+            text_color,
+            label,
+            label_font_size,
+            label_align,
+        );
         Self {
             graphics,
             last_rx: AtomicU64::new(0),
@@ -93,24 +106,15 @@ impl Module for Network {
     fn measure(&self) -> ModuleSize {
         // Measure with reasonable max width
         let text = "󰁆999M 󰁞999M";
-        let width = self.graphics.measure_text(text);
-        let height = self.graphics.font_height();
+        let width = self.graphics.measure_width(text);
+        let height = self.graphics.measure_height();
         ModuleSize { width, height }
     }
 
     fn draw(&self, render_ctx: &mut RenderContext) {
         let text = self.display_text();
-
         let (x, _y, width, height) = render_ctx.bounds;
-        let text_width = self.graphics.measure_text(&text);
-        let font_height = self.graphics.font_height();
-        let font_descent = self.graphics.font_descent();
-
-        let text_x = x + (width - text_width) / 2.0;
-        let text_y = (height - font_height) / 2.0 + font_descent;
-
-        self.graphics
-            .draw_text(render_ctx.ctx, &text, text_x, text_y);
+        self.graphics.draw(render_ctx.ctx, &text, x, width, height);
     }
 
     fn update(&mut self) -> bool {

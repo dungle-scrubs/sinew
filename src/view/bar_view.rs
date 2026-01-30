@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use objc2::rc::Retained;
 use objc2::{define_class, msg_send, MainThreadMarker, MainThreadOnly};
 use objc2_app_kit::{
-    NSApplication, NSColor, NSEvent, NSGraphicsContext, NSRectFill, NSTrackingArea,
+    NSApplication, NSBezierPath, NSColor, NSEvent, NSGraphicsContext, NSRectFill, NSTrackingArea,
     NSTrackingAreaOptions, NSView,
 };
 use objc2_foundation::{NSPoint, NSRect};
@@ -710,6 +710,7 @@ impl BarView {
             background: Option<(f64, f64, f64, f64)>,
             border_color: Option<(f64, f64, f64, f64)>,
             border_width: f64,
+            padding: f64,
         }
 
         // First pass: collect group bounds and styling
@@ -717,7 +718,6 @@ impl BarView {
             std::collections::HashMap::new();
         for positioned in &cache.modules {
             if let Some(ref group) = positioned.group {
-                let padding = positioned.style.padding;
                 let entry = group_bounds.entry(group.clone()).or_insert(GroupStyle {
                     min_x: f64::MAX,
                     max_x: 0.0,
@@ -725,9 +725,11 @@ impl BarView {
                     background: positioned.style.background,
                     border_color: positioned.style.border_color,
                     border_width: positioned.style.border_width,
+                    padding: positioned.style.padding,
                 });
-                entry.min_x = entry.min_x.min(positioned.x - padding);
-                entry.max_x = entry.max_x.max(positioned.x + positioned.width + padding);
+                // Group bounds use module content bounds; padding extends the background
+                entry.min_x = entry.min_x.min(positioned.x);
+                entry.max_x = entry.max_x.max(positioned.x + positioned.width);
                 // Use first non-None values for styling
                 if entry.background.is_none() {
                     entry.background = positioned.style.background;
@@ -747,8 +749,10 @@ impl BarView {
 
         // Draw group backgrounds and borders
         for group_style in group_bounds.values() {
-            let bg_x = group_style.min_x;
-            let bg_width = group_style.max_x - group_style.min_x;
+            // Extend background outward by padding so content has breathing room
+            let padding = group_style.padding;
+            let bg_x = group_style.min_x - padding;
+            let bg_width = (group_style.max_x - group_style.min_x) + padding * 2.0;
             let radius = group_style.corner_radius;
 
             // Draw background
@@ -784,6 +788,7 @@ impl BarView {
 
         // Draw modules
         for positioned in &cache.modules {
+            // Module content draws at its natural position; group background extends by padding
             let module_bounds = (positioned.x, 0.0, positioned.width, bar_height);
             let is_module_hovering = state
                 .mouse_position

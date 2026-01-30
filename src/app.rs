@@ -21,7 +21,6 @@ pub struct App {
     config: SharedConfig,
     config_watcher: Option<ConfigWatcher>,
     _mouse_monitor: Option<MouseMonitor>,
-    _menu_bar_monitor: Option<Retained<objc2::runtime::AnyObject>>,
     // Current popup state
     popup: Option<ActivePopup>,
     // Full-width panel
@@ -71,16 +70,6 @@ impl App {
         let (bar_y, bar_height, screen_width, screen_height) =
             screen_info.unwrap_or((0.0, 32.0, 0.0, 0.0));
 
-        // Start menu bar monitor if autohide is enabled
-        let autohide_enabled = config.read().map(|c| c.bar.autohide).unwrap_or(false);
-
-        let menu_bar_monitor = if autohide_enabled {
-            let ns_windows: Vec<_> = windows.iter().map(|w| w.window.clone()).collect();
-            crate::window::start_menu_bar_monitor(mtm, ns_windows, screen_height, bar_height)
-        } else {
-            None
-        };
-
         Self {
             _app: app,
             windows,
@@ -88,7 +77,6 @@ impl App {
             config,
             config_watcher,
             _mouse_monitor: mouse_monitor,
-            _menu_bar_monitor: menu_bar_monitor,
             popup: None,
             panel: None,
             panel_view: None,

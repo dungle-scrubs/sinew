@@ -172,6 +172,12 @@ pub struct ModuleConfig {
     pub active_border_color: Option<String>,
     /// Text color when toggle is active
     pub active_color: Option<String>,
+    /// Small header label displayed above the main value (e.g., "RAM", "CPU", "DISK")
+    pub label: Option<String>,
+    /// Font size for the label (defaults to 0.7 × main font_size)
+    pub label_font_size: Option<f64>,
+    /// Label text alignment: "left", "center", "right" (default "center")
+    pub label_align: Option<String>,
 }
 
 fn default_show_while_loading() -> bool {
@@ -494,9 +500,6 @@ pub struct BarConfig {
     /// Notch configuration
     #[serde(default)]
     pub notch: NotchConfig,
-    /// Slide bar down when macOS menu bar appears (for auto-hide menu bar users)
-    #[serde(default)]
-    pub autohide: bool,
     /// Popup/panel background color (defaults to bar background_color)
     pub popup_background_color: Option<String>,
     /// Popup/panel text color (defaults to bar text_color)
@@ -517,7 +520,6 @@ impl Default for BarConfig {
             border_width: default_bar_border_width(),
             border_radius: 0.0,
             notch: NotchConfig::default(),
-            autohide: false,
             popup_background_color: None,
             popup_text_color: None,
         }

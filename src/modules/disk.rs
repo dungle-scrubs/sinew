@@ -1,16 +1,30 @@
-use super::{Module, ModuleSize, RenderContext};
-use crate::render::Graphics;
+use super::{LabelAlign, LabeledGraphics, Module, ModuleSize, RenderContext};
 use std::sync::atomic::{AtomicU8, Ordering};
 
 pub struct Disk {
-    graphics: Graphics,
+    graphics: LabeledGraphics,
     path: String,
     cached_percentage: AtomicU8,
 }
 
 impl Disk {
-    pub fn new(path: &str, font_family: &str, font_size: f64, text_color: &str) -> Self {
-        let graphics = Graphics::new("#000000", text_color, font_family, font_size);
+    pub fn new(
+        path: &str,
+        font_family: &str,
+        font_size: f64,
+        text_color: &str,
+        label: Option<&str>,
+        label_font_size: Option<f64>,
+        label_align: LabelAlign,
+    ) -> Self {
+        let graphics = LabeledGraphics::new(
+            font_family,
+            font_size,
+            text_color,
+            label,
+            label_font_size,
+            label_align,
+        );
         Self {
             graphics,
             path: path.to_string(),
@@ -55,24 +69,15 @@ impl Module for Disk {
 
     fn measure(&self) -> ModuleSize {
         let text = "󰋊 100%";
-        let width = self.graphics.measure_text(text);
-        let height = self.graphics.font_height();
+        let width = self.graphics.measure_width(text);
+        let height = self.graphics.measure_height();
         ModuleSize { width, height }
     }
 
     fn draw(&self, render_ctx: &mut RenderContext) {
         let text = self.display_text();
-
         let (x, _y, width, height) = render_ctx.bounds;
-        let text_width = self.graphics.measure_text(&text);
-        let font_height = self.graphics.font_height();
-        let font_descent = self.graphics.font_descent();
-
-        let text_x = x + (width - text_width) / 2.0;
-        let text_y = (height - font_height) / 2.0 + font_descent;
-
-        self.graphics
-            .draw_text(render_ctx.ctx, &text, text_x, text_y);
+        self.graphics.draw(render_ctx.ctx, &text, x, width, height);
     }
 
     fn update(&mut self) -> bool {

@@ -33,7 +33,140 @@ pub use weather::Weather;
 pub use wifi::Wifi;
 pub use window_title::WindowTitle;
 
+use crate::render::Graphics;
 use core_graphics::context::CGContext;
+
+/// Default label font size multiplier (relative to main font size)
+const LABEL_SIZE_MULTIPLIER: f64 = 0.7;
+/// Spacing between label and main text (negative for tighter layout)
+const LABEL_SPACING: f64 = -2.0;
+
+/// Label text alignment
+#[derive(Debug, Clone, Copy, Default)]
+pub enum LabelAlign {
+    Left,
+    #[default]
+    Center,
+    Right,
+}
+
+/// Helper for modules with optional header labels above the main value.
+/// Manages two Graphics instances - one for the main text and one for the smaller label.
+pub struct LabeledGraphics {
+    pub main: Graphics,
+    pub label: Option<Graphics>,
+    pub label_text: Option<String>,
+    pub label_align: LabelAlign,
+}
+
+impl LabeledGraphics {
+    /// Creates a new LabeledGraphics instance.
+    ///
+    /// @param font_family - Font family name
+    /// @param main_size - Font size for main text
+    /// @param text_color - Hex color for text
+    /// @param label - Optional label text (e.g., "RAM", "CPU")
+    /// @param label_size - Optional label font size (defaults to 0.7 × main_size)
+    /// @param label_align - Label text alignment (defaults to Center)
+    /// @returns LabeledGraphics instance
+    pub fn new(
+        font_family: &str,
+        main_size: f64,
+        text_color: &str,
+        label: Option<&str>,
+        label_size: Option<f64>,
+        label_align: LabelAlign,
+    ) -> Self {
+        let main = Graphics::new("#000000", text_color, font_family, main_size);
+        let (label_graphics, label_text) = if let Some(label_str) = label {
+            let size = label_size.unwrap_or(main_size * LABEL_SIZE_MULTIPLIER);
+            let graphics = Graphics::new("#000000", text_color, font_family, size);
+            (Some(graphics), Some(label_str.to_string()))
+        } else {
+            (None, None)
+        };
+
+        Self {
+            main,
+            label: label_graphics,
+            label_text,
+            label_align,
+        }
+    }
+
+    /// Returns combined height of label + spacing + main text, or just main text height if no label.
+    pub fn measure_height(&self) -> f64 {
+        if let Some(ref label) = self.label {
+            label.font_height() + LABEL_SPACING + self.main.font_height()
+        } else {
+            self.main.font_height()
+        }
+    }
+
+    /// Returns the width needed to display content (max of label width and main text width).
+    pub fn measure_width(&self, main_text: &str) -> f64 {
+        let main_width = self.main.measure_text(main_text);
+        if let (Some(ref label), Some(ref label_text)) = (&self.label, &self.label_text) {
+            main_width.max(label.measure_text(label_text))
+        } else {
+            main_width
+        }
+    }
+
+    /// Draws label (if present) above main text within the given bounds.
+    ///
+    /// @param ctx - Core Graphics context
+    /// @param main_text - Text to display as main value
+    /// @param x - X position of content area
+    /// @param width - Width of content area
+    /// @param height - Height of content area (bar height)
+    pub fn draw(&self, ctx: &mut CGContext, main_text: &str, x: f64, width: f64, height: f64) {
+        let total_height = self.measure_height();
+        let main_width = self.main.measure_text(main_text);
+        let main_descent = self.main.font_descent();
+
+        if let (Some(ref label), Some(ref label_text)) = (&self.label, &self.label_text) {
+            // Two-line layout: label above main text
+            let label_width = label.measure_text(label_text);
+            let label_descent = label.font_descent();
+            let main_height = self.main.font_height();
+
+            // Vertical centering: position from bottom
+            let y_start = (height - total_height) / 2.0;
+
+            // Main text baseline position (from bottom of content area) - always centered
+            let main_y = y_start + main_descent;
+            let main_x = x + (width - main_width) / 2.0;
+            self.main.draw_text(ctx, main_text, main_x, main_y);
+
+            // Label baseline position (above main text + spacing)
+            let label_y = y_start + main_height + LABEL_SPACING + label_descent;
+            // Label X position based on alignment - aligned relative to main text, not full width
+            let label_x = match self.label_align {
+                LabelAlign::Left => main_x,
+                LabelAlign::Center => main_x + (main_width - label_width) / 2.0,
+                LabelAlign::Right => main_x + main_width - label_width,
+            };
+            label.draw_text(ctx, label_text, label_x, label_y);
+        } else {
+            // Single line layout: just main text, vertically centered
+            let main_height = self.main.font_height();
+            let text_x = x + (width - main_width) / 2.0;
+            let text_y = (height - main_height) / 2.0 + main_descent;
+            self.main.draw_text(ctx, main_text, text_x, text_y);
+        }
+    }
+
+    /// Convenience method to measure text width using main graphics
+    pub fn measure_text(&self, text: &str) -> f64 {
+        self.main.measure_text(text)
+    }
+
+    /// Returns true if this instance has a label configured
+    pub fn has_label(&self) -> bool {
+        self.label.is_some()
+    }
+}
 
 /// Zone within a bar half
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -338,6 +471,9 @@ struct ModuleContext<'a> {
     font_family: &'a str,
     font_size: f64,
     text_color: &'a str,
+    label: Option<&'a str>,
+    label_font_size: Option<f64>,
+    label_align: LabelAlign,
 }
 
 impl<'a> ModuleContext<'a> {
@@ -348,6 +484,11 @@ impl<'a> ModuleContext<'a> {
         bar_font_size: f64,
         bar_text_color: &'a str,
     ) -> Self {
+        let label_align = match config.label_align.as_deref() {
+            Some("left") => LabelAlign::Left,
+            Some("right") => LabelAlign::Right,
+            _ => LabelAlign::Center,
+        };
         Self {
             id: config
                 .id
@@ -356,16 +497,26 @@ impl<'a> ModuleContext<'a> {
             font_family: bar_font_family,
             font_size: config.font_size.unwrap_or(bar_font_size),
             text_color: config.color.as_deref().unwrap_or(bar_text_color),
+            label: config.label.as_deref(),
+            label_font_size: config.label_font_size,
+            label_align,
         }
     }
 
-    /// Create a simple module that only needs font parameters
-    fn simple<F, M>(&self, f: F) -> Box<dyn Module>
+    /// Create a labeled module that supports header labels
+    fn labeled<F, M>(&self, f: F) -> Box<dyn Module>
     where
-        F: FnOnce(&str, f64, &str) -> M,
+        F: FnOnce(&str, f64, &str, Option<&str>, Option<f64>, LabelAlign) -> M,
         M: Module + 'static,
     {
-        Box::new(f(self.font_family, self.font_size, self.text_color))
+        Box::new(f(
+            self.font_family,
+            self.font_size,
+            self.text_color,
+            self.label,
+            self.label_font_size,
+            self.label_align,
+        ))
     }
 }
 
@@ -386,13 +537,19 @@ pub fn create_module_from_config(
     );
 
     let module: Option<Box<dyn Module>> = match config.module_type.as_str() {
+        // Labeled modules - support optional header labels above values
+        "battery" => Some(ctx.labeled(Battery::new)),
+        "cpu" => Some(ctx.labeled(Cpu::new)),
+        "memory" => Some(ctx.labeled(Memory::new)),
+        "network" => Some(ctx.labeled(Network::new)),
+        "wifi" => Some(ctx.labeled(Wifi::new)),
+
         // Simple modules - just need font parameters
-        "battery" => Some(ctx.simple(Battery::new)),
-        "cpu" => Some(ctx.simple(Cpu::new)),
-        "memory" => Some(ctx.simple(Memory::new)),
-        "volume" => Some(ctx.simple(Volume::new)),
-        "network" => Some(ctx.simple(Network::new)),
-        "wifi" => Some(ctx.simple(Wifi::new)),
+        "volume" => Some(Box::new(Volume::new(
+            ctx.font_family,
+            ctx.font_size,
+            ctx.text_color,
+        ))),
 
         // Format-based modules
         "clock" => {
@@ -463,6 +620,9 @@ pub fn create_module_from_config(
                 ctx.font_family,
                 ctx.font_size,
                 ctx.text_color,
+                ctx.label,
+                ctx.label_font_size,
+                ctx.label_align,
             )))
         }
         "script" => {

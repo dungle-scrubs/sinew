@@ -61,6 +61,7 @@ impl Module for StaticText {
         let text_x = x + (width - text_width) / 2.0;
         let text_y = (height - font_height) / 2.0 + font_descent;
 
-        self.graphics.draw_text(render_ctx.ctx, &text, text_x, text_y);
+        self.graphics
+            .draw_text(render_ctx.ctx, &text, text_x, text_y);
     }
 }

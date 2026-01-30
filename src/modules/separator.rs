@@ -1,5 +1,5 @@
-use crate::render::Graphics;
 use super::{Module, ModuleSize, RenderContext};
+use crate::render::Graphics;
 
 /// Type of separator
 #[derive(Debug, Clone)]
@@ -21,7 +21,13 @@ pub struct Separator {
 }
 
 impl Separator {
-    pub fn new(id: &str, separator_type: SeparatorType, font_family: &str, font_size: f64, text_color: &str) -> Self {
+    pub fn new(
+        id: &str,
+        separator_type: SeparatorType,
+        font_family: &str,
+        font_size: f64,
+        text_color: &str,
+    ) -> Self {
         let graphics = Graphics::new("#000000", text_color, font_family, font_size);
         Self {
             separator_type,
@@ -30,20 +36,70 @@ impl Separator {
         }
     }
 
-    pub fn space(id: &str, width: f64, font_family: &str, font_size: f64, text_color: &str) -> Self {
-        Self::new(id, SeparatorType::Space(width), font_family, font_size, text_color)
+    pub fn space(
+        id: &str,
+        width: f64,
+        font_family: &str,
+        font_size: f64,
+        text_color: &str,
+    ) -> Self {
+        Self::new(
+            id,
+            SeparatorType::Space(width),
+            font_family,
+            font_size,
+            text_color,
+        )
     }
 
-    pub fn line(id: &str, width: f64, color: &str, font_family: &str, font_size: f64, text_color: &str) -> Self {
-        Self::new(id, SeparatorType::Line { width, color: color.to_string() }, font_family, font_size, text_color)
+    pub fn line(
+        id: &str,
+        width: f64,
+        color: &str,
+        font_family: &str,
+        font_size: f64,
+        text_color: &str,
+    ) -> Self {
+        Self::new(
+            id,
+            SeparatorType::Line {
+                width,
+                color: color.to_string(),
+            },
+            font_family,
+            font_size,
+            text_color,
+        )
     }
 
-    pub fn dot(id: &str, radius: f64, color: &str, font_family: &str, font_size: f64, text_color: &str) -> Self {
-        Self::new(id, SeparatorType::Dot { radius, color: color.to_string() }, font_family, font_size, text_color)
+    pub fn dot(
+        id: &str,
+        radius: f64,
+        color: &str,
+        font_family: &str,
+        font_size: f64,
+        text_color: &str,
+    ) -> Self {
+        Self::new(
+            id,
+            SeparatorType::Dot {
+                radius,
+                color: color.to_string(),
+            },
+            font_family,
+            font_size,
+            text_color,
+        )
     }
 
     pub fn icon(id: &str, icon: &str, font_family: &str, font_size: f64, text_color: &str) -> Self {
-        Self::new(id, SeparatorType::Icon(icon.to_string()), font_family, font_size, text_color)
+        Self::new(
+            id,
+            SeparatorType::Icon(icon.to_string()),
+            font_family,
+            font_size,
+            text_color,
+        )
     }
 }
 
@@ -72,7 +128,10 @@ impl Module for Separator {
             SeparatorType::Space(_) => {
                 // Nothing to draw
             }
-            SeparatorType::Line { width: line_width, color } => {
+            SeparatorType::Line {
+                width: line_width,
+                color,
+            } => {
                 let (r, g, b, a) = parse_color(color);
                 let ctx = &mut *render_ctx.ctx;
                 ctx.set_rgb_fill_color(r, g, b, a);
@@ -109,7 +168,8 @@ impl Module for Separator {
                 let text_x = x + (width - text_width) / 2.0;
                 let text_y = (height - font_height) / 2.0 + font_descent;
 
-                self.graphics.draw_text(render_ctx.ctx, icon, text_x, text_y);
+                self.graphics
+                    .draw_text(render_ctx.ctx, icon, text_x, text_y);
             }
         }
     }
@@ -133,5 +193,10 @@ fn parse_color(hex: &str) -> (f64, f64, f64, f64) {
         }
         _ => (0, 0, 0, 255),
     };
-    (r as f64 / 255.0, g as f64 / 255.0, b as f64 / 255.0, a as f64 / 255.0)
+    (
+        r as f64 / 255.0,
+        g as f64 / 255.0,
+        b as f64 / 255.0,
+        a as f64 / 255.0,
+    )
 }

@@ -1,6 +1,6 @@
-use std::sync::Mutex;
-use crate::render::Graphics;
 use super::{Module, ModuleSize, RenderContext};
+use crate::render::Graphics;
+use std::sync::Mutex;
 
 pub struct NowPlaying {
     graphics: Graphics,
@@ -15,7 +15,12 @@ struct TrackInfo {
 }
 
 impl NowPlaying {
-    pub fn new(max_len: Option<usize>, font_family: &str, font_size: f64, text_color: &str) -> Self {
+    pub fn new(
+        max_len: Option<usize>,
+        font_family: &str,
+        font_size: f64,
+        text_color: &str,
+    ) -> Self {
         let graphics = Graphics::new("#000000", text_color, font_family, font_size);
         Self {
             graphics,
@@ -141,7 +146,8 @@ impl Module for NowPlaying {
         let text_x = x + (width - text_width) / 2.0;
         let text_y = (height - font_height) / 2.0 + font_descent;
 
-        self.graphics.draw_text(render_ctx.ctx, &text, text_x, text_y);
+        self.graphics
+            .draw_text(render_ctx.ctx, &text, text_x, text_y);
     }
 
     fn update(&mut self) -> bool {

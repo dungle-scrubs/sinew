@@ -24,7 +24,7 @@ pub use memory::Memory;
 pub use network::Network;
 pub use now_playing::NowPlaying;
 pub use script::Script;
-pub use separator::{Separator, SeparatorType};
+pub use separator::Separator;
 pub use static_text::StaticText;
 pub use volume::Volume;
 pub use wifi::Wifi;
@@ -294,7 +294,10 @@ pub fn create_module_from_config(
     bar_font_size: f64,
     bar_text_color: &str,
 ) -> Option<CreatedModule> {
-    let id = config.id.clone().unwrap_or_else(|| format!("{}-{}", config.module_type, index));
+    let id = config
+        .id
+        .clone()
+        .unwrap_or_else(|| format!("{}-{}", config.module_type, index));
     let font_family = bar_font_family;
     let font_size = config.font_size.unwrap_or(bar_font_size);
     let text_color = config.color.as_deref().unwrap_or(bar_text_color);
@@ -302,22 +305,28 @@ pub fn create_module_from_config(
     let module: Option<Box<dyn Module>> = match config.module_type.as_str() {
         "clock" => {
             let format = config.format.as_deref().unwrap_or("%a %b %d  %H:%M:%S");
-            Some(Box::new(Clock::new(format, font_family, font_size, text_color)))
+            Some(Box::new(Clock::new(
+                format,
+                font_family,
+                font_size,
+                text_color,
+            )))
         }
         "static" => {
             let text = config.text.as_deref().unwrap_or("");
             let icon = config.icon.as_deref();
-            Some(Box::new(StaticText::new(&id, text, icon, font_family, font_size, text_color)))
+            Some(Box::new(StaticText::new(
+                &id,
+                text,
+                icon,
+                font_family,
+                font_size,
+                text_color,
+            )))
         }
-        "battery" => {
-            Some(Box::new(Battery::new(font_family, font_size, text_color)))
-        }
-        "cpu" => {
-            Some(Box::new(Cpu::new(font_family, font_size, text_color)))
-        }
-        "memory" => {
-            Some(Box::new(Memory::new(font_family, font_size, text_color)))
-        }
+        "battery" => Some(Box::new(Battery::new(font_family, font_size, text_color))),
+        "cpu" => Some(Box::new(Cpu::new(font_family, font_size, text_color))),
+        "memory" => Some(Box::new(Memory::new(font_family, font_size, text_color))),
         "separator" => {
             // Default to space separator, or parse type from config
             let sep_type = config.separator_type.as_deref().unwrap_or("space");
@@ -325,8 +334,22 @@ pub fn create_module_from_config(
             let sep_color = config.separator_color.as_deref().unwrap_or("#666666");
 
             let separator = match sep_type {
-                "line" => Separator::line(&id, sep_width, sep_color, font_family, font_size, text_color),
-                "dot" => Separator::dot(&id, sep_width, sep_color, font_family, font_size, text_color),
+                "line" => Separator::line(
+                    &id,
+                    sep_width,
+                    sep_color,
+                    font_family,
+                    font_size,
+                    text_color,
+                ),
+                "dot" => Separator::dot(
+                    &id,
+                    sep_width,
+                    sep_color,
+                    font_family,
+                    font_size,
+                    text_color,
+                ),
                 "icon" => {
                     let icon = config.icon.as_deref().unwrap_or("│");
                     Separator::icon(&id, icon, font_family, font_size, text_color)
@@ -335,40 +358,67 @@ pub fn create_module_from_config(
             };
             Some(Box::new(separator))
         }
-        "volume" => {
-            Some(Box::new(Volume::new(font_family, font_size, text_color)))
-        }
+        "volume" => Some(Box::new(Volume::new(font_family, font_size, text_color))),
         "disk" => {
             let path = config.path.as_deref().unwrap_or("/");
-            Some(Box::new(Disk::new(path, font_family, font_size, text_color)))
+            Some(Box::new(Disk::new(
+                path,
+                font_family,
+                font_size,
+                text_color,
+            )))
         }
-        "network" => {
-            Some(Box::new(Network::new(font_family, font_size, text_color)))
-        }
-        "wifi" => {
-            Some(Box::new(Wifi::new(font_family, font_size, text_color)))
-        }
+        "network" => Some(Box::new(Network::new(font_family, font_size, text_color))),
+        "wifi" => Some(Box::new(Wifi::new(font_family, font_size, text_color))),
         "date" => {
             let format = config.format.as_deref().unwrap_or("%a %b %d");
-            Some(Box::new(Date::new(format, font_family, font_size, text_color)))
+            Some(Box::new(Date::new(
+                format,
+                font_family,
+                font_size,
+                text_color,
+            )))
         }
         "app_name" => {
             let max_len = config.max_length.map(|v| v as usize);
-            Some(Box::new(AppName::new(max_len, font_family, font_size, text_color)))
+            Some(Box::new(AppName::new(
+                max_len,
+                font_family,
+                font_size,
+                text_color,
+            )))
         }
         "now_playing" => {
             let max_len = config.max_length.map(|v| v as usize);
-            Some(Box::new(NowPlaying::new(max_len, font_family, font_size, text_color)))
+            Some(Box::new(NowPlaying::new(
+                max_len,
+                font_family,
+                font_size,
+                text_color,
+            )))
         }
         "script" => {
             let command = config.command.as_deref().unwrap_or("echo 'no command'");
             let interval = config.interval.map(|v| v as u64);
             let icon = config.icon.as_deref();
-            Some(Box::new(Script::new(&id, command, interval, icon, font_family, font_size, text_color)))
+            Some(Box::new(Script::new(
+                &id,
+                command,
+                interval,
+                icon,
+                font_family,
+                font_size,
+                text_color,
+            )))
         }
         "window_title" => {
             let max_len = config.max_length.map(|v| v as usize);
-            Some(Box::new(WindowTitle::new(max_len, font_family, font_size, text_color)))
+            Some(Box::new(WindowTitle::new(
+                max_len,
+                font_family,
+                font_size,
+                text_color,
+            )))
         }
         unknown => {
             log::warn!("Unknown module type: {}", unknown);
@@ -378,13 +428,25 @@ pub fn create_module_from_config(
 
     // Parse style from config
     let style = ModuleStyle {
-        background: config.background.as_ref().and_then(|c| crate::config::parse_hex_color(c)),
-        border_color: config.border_color.as_ref().and_then(|c| crate::config::parse_hex_color(c)),
+        background: config
+            .background
+            .as_ref()
+            .and_then(|c| crate::config::parse_hex_color(c)),
+        border_color: config
+            .border_color
+            .as_ref()
+            .and_then(|c| crate::config::parse_hex_color(c)),
         border_width: config.border_width.unwrap_or(0.0),
         corner_radius: config.corner_radius.unwrap_or(0.0),
         padding: config.padding.unwrap_or(0.0),
-        critical_color: config.critical_color.as_ref().and_then(|c| crate::config::parse_hex_color(c)),
-        warning_color: config.warning_color.as_ref().and_then(|c| crate::config::parse_hex_color(c)),
+        critical_color: config
+            .critical_color
+            .as_ref()
+            .and_then(|c| crate::config::parse_hex_color(c)),
+        warning_color: config
+            .warning_color
+            .as_ref()
+            .and_then(|c| crate::config::parse_hex_color(c)),
         critical_threshold: config.critical_threshold.unwrap_or(20.0),
         warning_threshold: config.warning_threshold.unwrap_or(40.0),
     };

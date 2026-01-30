@@ -1,7 +1,7 @@
 //! Full-width slide-down panel
 
-use objc2::rc::Retained;
 use objc2::MainThreadMarker;
+use objc2::rc::Retained;
 use objc2_app_kit::{
     NSBackingStoreType, NSColor, NSView, NSWindow, NSWindowCollectionBehavior, NSWindowStyleMask,
 };
@@ -49,6 +49,10 @@ impl Panel {
             | NSWindowCollectionBehavior::Transient;
         window.setCollectionBehavior(behaviors);
 
+        // Accept mouse events including scroll
+        window.setAcceptsMouseMovedEvents(true);
+        window.setIgnoresMouseEvents(false);
+
         Self {
             window,
             is_visible: false,
@@ -90,5 +94,15 @@ impl Panel {
     /// Set the content view
     pub fn set_content_view(&self, view: &NSView) {
         self.window.setContentView(Some(view));
+    }
+
+    /// Make the given view the first responder (to receive scroll events)
+    pub fn make_first_responder(&self, view: &NSView) {
+        self.window.makeFirstResponder(Some(view));
+    }
+
+    /// Get the underlying NSWindow
+    pub fn window(&self) -> &NSWindow {
+        &self.window
     }
 }

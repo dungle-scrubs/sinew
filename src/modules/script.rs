@@ -1,7 +1,7 @@
+use super::{Module, ModuleSize, RenderContext};
+use crate::render::Graphics;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
-use crate::render::Graphics;
-use super::{Module, ModuleSize, RenderContext};
 
 pub struct Script {
     graphics: Graphics,
@@ -42,9 +42,7 @@ impl Script {
             .ok();
 
         if let Some(output) = output {
-            String::from_utf8_lossy(&output.stdout)
-                .trim()
-                .to_string()
+            String::from_utf8_lossy(&output.stdout).trim().to_string()
         } else {
             "error".to_string()
         }
@@ -67,7 +65,11 @@ impl Module for Script {
 
     fn measure(&self) -> ModuleSize {
         let text = self.display_text();
-        let text = if text.is_empty() { "Loading...".to_string() } else { text };
+        let text = if text.is_empty() {
+            "Loading...".to_string()
+        } else {
+            text
+        };
         let width = self.graphics.measure_text(&text);
         let height = self.graphics.font_height();
         ModuleSize { width, height }
@@ -87,7 +89,8 @@ impl Module for Script {
         let text_x = x + (width - text_width) / 2.0;
         let text_y = (height - font_height) / 2.0 + font_descent;
 
-        self.graphics.draw_text(render_ctx.ctx, &text, text_x, text_y);
+        self.graphics
+            .draw_text(render_ctx.ctx, &text, text_x, text_y);
     }
 
     fn update(&mut self) -> bool {

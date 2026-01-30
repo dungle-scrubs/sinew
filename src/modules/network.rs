@@ -1,15 +1,15 @@
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
-use std::time::Instant;
-use crate::render::Graphics;
 use super::{Module, ModuleSize, RenderContext};
+use crate::render::Graphics;
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Instant;
 
 pub struct Network {
     graphics: Graphics,
     last_rx: AtomicU64,
     last_tx: AtomicU64,
     last_update: Mutex<Option<Instant>>,
-    cached_rx_speed: AtomicU64,  // bytes per second
+    cached_rx_speed: AtomicU64, // bytes per second
     cached_tx_speed: AtomicU64,
 }
 
@@ -77,7 +77,11 @@ impl Network {
     fn display_text(&self) -> String {
         let rx_speed = self.cached_rx_speed.load(Ordering::Relaxed);
         let tx_speed = self.cached_tx_speed.load(Ordering::Relaxed);
-        format!("󰁆{} 󰁞{}", Self::format_speed(rx_speed), Self::format_speed(tx_speed))
+        format!(
+            "󰁆{} 󰁞{}",
+            Self::format_speed(rx_speed),
+            Self::format_speed(tx_speed)
+        )
     }
 }
 
@@ -105,7 +109,8 @@ impl Module for Network {
         let text_x = x + (width - text_width) / 2.0;
         let text_y = (height - font_height) / 2.0 + font_descent;
 
-        self.graphics.draw_text(render_ctx.ctx, &text, text_x, text_y);
+        self.graphics
+            .draw_text(render_ctx.ctx, &text, text_x, text_y);
     }
 
     fn update(&mut self) -> bool {

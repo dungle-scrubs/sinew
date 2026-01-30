@@ -1,8 +1,8 @@
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 
 /// IPC server for external control of RustyBar
@@ -38,8 +38,7 @@ impl IpcServer {
     }
 
     pub fn socket_path() -> PathBuf {
-        let runtime_dir = std::env::var("XDG_RUNTIME_DIR")
-            .unwrap_or_else(|_| "/tmp".to_string());
+        let runtime_dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".to_string());
         PathBuf::from(runtime_dir).join("rustybar.sock")
     }
 

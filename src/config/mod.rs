@@ -1,10 +1,10 @@
 mod types;
 
-pub use types::{parse_hex_color, Config, ModuleConfig};
+pub use types::{Config, ModuleConfig, parse_hex_color};
 
 use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
 use std::path::PathBuf;
-use std::sync::mpsc::{channel, Receiver};
+use std::sync::mpsc::{Receiver, channel};
 use std::sync::{Arc, RwLock};
 
 pub type SharedConfig = Arc<RwLock<Config>>;
@@ -86,11 +86,10 @@ impl ConfigWatcher {
         while let Ok(event) = self.receiver.try_recv() {
             match event {
                 Ok(event) => {
-                    let is_config = event.paths.iter().any(|p| {
-                        p.file_name()
-                            .map(|n| n == "config.toml")
-                            .unwrap_or(false)
-                    });
+                    let is_config = event
+                        .paths
+                        .iter()
+                        .any(|p| p.file_name().map(|n| n == "config.toml").unwrap_or(false));
 
                     if is_config && (event.kind.is_modify() || event.kind.is_create()) {
                         should_reload = true;

@@ -1,6 +1,6 @@
-use std::sync::atomic::{AtomicU8, AtomicBool, Ordering};
-use crate::render::Graphics;
 use super::{Module, ModuleSize, RenderContext};
+use crate::render::Graphics;
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
 pub struct Volume {
     graphics: Graphics,
@@ -43,7 +43,8 @@ impl Volume {
         let muted = if let Some(output) = muted_output {
             String::from_utf8_lossy(&output.stdout)
                 .trim()
-                .to_lowercase() == "true"
+                .to_lowercase()
+                == "true"
         } else {
             false
         };
@@ -100,7 +101,8 @@ impl Module for Volume {
         let text_x = x + (width - text_width) / 2.0;
         let text_y = (height - font_height) / 2.0 + font_descent;
 
-        self.graphics.draw_text(render_ctx.ctx, &text, text_x, text_y);
+        self.graphics
+            .draw_text(render_ctx.ctx, &text, text_x, text_y);
     }
 
     fn update(&mut self) -> bool {

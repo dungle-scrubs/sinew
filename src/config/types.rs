@@ -288,7 +288,10 @@ mod tests {
         assert_eq!(parse_hex_color("#ffffff"), Some((1.0, 1.0, 1.0, 1.0)));
         assert_eq!(parse_hex_color("#000000"), Some((0.0, 0.0, 0.0, 1.0)));
         assert_eq!(parse_hex_color("#ff0000"), Some((1.0, 0.0, 0.0, 1.0)));
-        assert_eq!(parse_hex_color("#00ff0080"), Some((0.0, 1.0, 0.0, 0.5019607843137255)));
+        assert_eq!(
+            parse_hex_color("#00ff0080"),
+            Some((0.0, 1.0, 0.0, 0.5019607843137255))
+        );
         assert_eq!(parse_hex_color("invalid"), None);
     }
 }

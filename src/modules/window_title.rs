@@ -1,6 +1,6 @@
-use std::sync::Mutex;
-use crate::render::Graphics;
 use super::{Module, ModuleSize, RenderContext};
+use crate::render::Graphics;
+use std::sync::Mutex;
 
 pub struct WindowTitle {
     graphics: Graphics,
@@ -9,7 +9,12 @@ pub struct WindowTitle {
 }
 
 impl WindowTitle {
-    pub fn new(max_len: Option<usize>, font_family: &str, font_size: f64, text_color: &str) -> Self {
+    pub fn new(
+        max_len: Option<usize>,
+        font_family: &str,
+        font_size: f64,
+        text_color: &str,
+    ) -> Self {
         let graphics = Graphics::new("#000000", text_color, font_family, font_size);
         Self {
             graphics,
@@ -21,7 +26,9 @@ impl WindowTitle {
     fn get_window_title(&self) -> String {
         // Use osascript to get frontmost window title
         let output = std::process::Command::new("osascript")
-            .args(["-e", r#"
+            .args([
+                "-e",
+                r#"
                 tell application "System Events"
                     set frontApp to first application process whose frontmost is true
                     set appName to name of frontApp
@@ -34,14 +41,13 @@ impl WindowTitle {
                         return appName
                     end try
                 end tell
-            "#])
+            "#,
+            ])
             .output()
             .ok();
 
         if let Some(output) = output {
-            String::from_utf8_lossy(&output.stdout)
-                .trim()
-                .to_string()
+            String::from_utf8_lossy(&output.stdout).trim().to_string()
         } else {
             String::new()
         }
@@ -70,7 +76,11 @@ impl Module for WindowTitle {
 
     fn measure(&self) -> ModuleSize {
         let text = self.display_text();
-        let text = if text.is_empty() { "Window Title".to_string() } else { text };
+        let text = if text.is_empty() {
+            "Window Title".to_string()
+        } else {
+            text
+        };
         let width = self.graphics.measure_text(&text);
         let height = self.graphics.font_height();
         ModuleSize { width, height }
@@ -90,7 +100,8 @@ impl Module for WindowTitle {
         let text_x = x + (width - text_width) / 2.0;
         let text_y = (height - font_height) / 2.0 + font_descent;
 
-        self.graphics.draw_text(render_ctx.ctx, &text, text_x, text_y);
+        self.graphics
+            .draw_text(render_ctx.ctx, &text, text_x, text_y);
     }
 
     fn update(&mut self) -> bool {

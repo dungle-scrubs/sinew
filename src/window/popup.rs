@@ -1,5 +1,5 @@
-use objc2::rc::Retained;
 use objc2::MainThreadMarker;
+use objc2::rc::Retained;
 use objc2_app_kit::{
     NSBackingStoreType, NSColor, NSWindow, NSWindowCollectionBehavior, NSWindowStyleMask,
 };
@@ -41,6 +41,10 @@ impl PopupWindow {
             | NSWindowCollectionBehavior::IgnoresCycle
             | NSWindowCollectionBehavior::Transient;
         window.setCollectionBehavior(behaviors);
+
+        // Accept mouse events including scroll
+        window.setAcceptsMouseMovedEvents(true);
+        window.setIgnoresMouseEvents(false);
 
         Self { window }
     }

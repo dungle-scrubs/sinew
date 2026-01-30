@@ -2,15 +2,17 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 
 use objc2::rc::Retained;
-use objc2::{define_class, msg_send, MainThreadMarker, MainThreadOnly};
+use objc2::{MainThreadMarker, MainThreadOnly, define_class, msg_send};
 use objc2_app_kit::{
-    NSColor, NSCursor, NSEvent, NSGraphicsContext, NSRectFill, NSTrackingArea,
-    NSTrackingAreaOptions, NSView,
+    NSColor, NSEvent, NSGraphicsContext, NSRectFill, NSTrackingArea, NSTrackingAreaOptions, NSView,
 };
 use objc2_foundation::{NSPoint, NSRect};
 
-use crate::config::{parse_hex_color, SharedConfig};
-use crate::modules::{create_module_from_config, Alignment, Clock, ModuleStyle, ModuleWidth, MouseEvent, PositionedModule, RenderContext, Zone};
+use crate::config::{SharedConfig, parse_hex_color};
+use crate::modules::{
+    Alignment, Clock, ModuleWidth, MouseEvent, PositionedModule, RenderContext, Zone,
+    create_module_from_config,
+};
 use crate::window::WindowPosition;
 
 thread_local! {
@@ -251,7 +253,11 @@ define_class!(
 );
 
 impl BarView {
-    pub fn new(mtm: MainThreadMarker, config: SharedConfig, window_position: WindowPosition) -> Retained<Self> {
+    pub fn new(
+        mtm: MainThreadMarker,
+        config: SharedConfig,
+        window_position: WindowPosition,
+    ) -> Retained<Self> {
         let view: Retained<Self> = unsafe { msg_send![Self::alloc(mtm), init] };
 
         let view_id = &*view as *const _ as usize;
@@ -312,36 +318,45 @@ impl BarView {
         // Rebuild cache if config changed
         if state.cache.is_none() || state.config_version != current_version {
             if let Ok(config) = state.config.read() {
-                let bg_color = parse_hex_color(&config.bar.background_color)
-                    .unwrap_or((0.1, 0.1, 0.15, 1.0));
-                let text_color = parse_hex_color(&config.bar.text_color)
-                    .unwrap_or((0.8, 0.85, 0.95, 1.0));
+                let bg_color =
+                    parse_hex_color(&config.bar.background_color).unwrap_or((0.1, 0.1, 0.15, 1.0));
+                let text_color =
+                    parse_hex_color(&config.bar.text_color).unwrap_or((0.8, 0.85, 0.95, 1.0));
 
                 // Create modules based on config and window position
                 let mut modules = Vec::new();
 
                 // Helper to create modules from a zone's config
-                let create_modules = |zone_configs: &[crate::config::ModuleConfig], zone: Zone| -> Vec<PositionedModule> {
-                    zone_configs.iter().enumerate().filter_map(|(i, cfg)| {
-                        create_module_from_config(
-                            cfg,
-                            i,
-                            &config.bar.font_family,
-                            config.bar.font_size,
-                            &config.bar.text_color,
-                        ).map(|created| PositionedModule::new_with_flex(
-                            created.module,
-                            zone,
-                            created.flex,
-                            created.min_width,
-                            created.max_width,
-                            created.style,
-                            created.click_command,
-                            created.right_click_command,
-                            created.group,
-                            created.popup,
-                        ))
-                    }).collect()
+                let create_modules = |zone_configs: &[crate::config::ModuleConfig],
+                                      zone: Zone|
+                 -> Vec<PositionedModule> {
+                    zone_configs
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(i, cfg)| {
+                            create_module_from_config(
+                                cfg,
+                                i,
+                                &config.bar.font_family,
+                                config.bar.font_size,
+                                &config.bar.text_color,
+                            )
+                            .map(|created| {
+                                PositionedModule::new_with_flex(
+                                    created.module,
+                                    zone,
+                                    created.flex,
+                                    created.min_width,
+                                    created.max_width,
+                                    created.style,
+                                    created.click_command,
+                                    created.right_click_command,
+                                    created.group,
+                                    created.popup,
+                                )
+                            })
+                        })
+                        .collect()
                 };
 
                 // Determine which zones to use based on window position
@@ -387,14 +402,19 @@ impl BarView {
                             &config.bar.text_color,
                         );
 
-                        modules.push(PositionedModule::new_with_alignment(Box::new(clock), alignment));
+                        modules.push(PositionedModule::new_with_alignment(
+                            Box::new(clock),
+                            alignment,
+                        ));
                     }
                 }
 
                 // Set up fake notch for Full window if enabled
-                let fake_notch = if matches!(state.window_position, WindowPosition::Full) && config.bar.notch.fake {
-                    let notch_color = parse_hex_color(&config.bar.notch.color)
-                        .unwrap_or((0.0, 0.0, 0.0, 1.0));
+                let fake_notch = if matches!(state.window_position, WindowPosition::Full)
+                    && config.bar.notch.fake
+                {
+                    let notch_color =
+                        parse_hex_color(&config.bar.notch.color).unwrap_or((0.0, 0.0, 0.0, 1.0));
                     Some(FakeNotchSettings {
                         width: config.bar.notch.width,
                         color: notch_color,
@@ -510,13 +530,14 @@ impl BarView {
         }
 
         // Calculate notch exclusion zone boundaries
-        let (outer_max_x, inner_min_x) = if let Some((notch_start, notch_end)) = notch_exclusion_zone {
-            // Outer modules stop before notch, inner modules start after notch
-            (notch_start - padding, notch_end + padding)
-        } else {
-            // No notch - modules can use full width (outer and inner meet in middle)
-            (bar_width / 2.0, bar_width / 2.0)
-        };
+        let (outer_max_x, inner_min_x) =
+            if let Some((notch_start, notch_end)) = notch_exclusion_zone {
+                // Outer modules stop before notch, inner modules start after notch
+                (notch_start - padding, notch_end + padding)
+            } else {
+                // No notch - modules can use full width (outer and inner meet in middle)
+                (bar_width / 2.0, bar_width / 2.0)
+            };
 
         // Calculate available space for flex modules (accounting for notch exclusion)
         let notch_width = if notch_exclusion_zone.is_some() {
@@ -524,7 +545,8 @@ impl BarView {
         } else {
             0.0
         };
-        let available_for_flex = (bar_width - fixed_width_total - padding - notch_width).max(flex_min_total);
+        let available_for_flex =
+            (bar_width - fixed_width_total - padding - notch_width).max(flex_min_total);
         let flex_width_each = if flex_count > 0 {
             available_for_flex / flex_count as f64
         } else {
@@ -569,7 +591,15 @@ impl BarView {
         }
 
         // Helper to draw rounded rectangle
-        fn draw_rounded_rect(ctx: &mut core_graphics::context::CGContext, x: f64, y: f64, w: f64, h: f64, r: f64, fill: bool) {
+        fn draw_rounded_rect(
+            ctx: &mut core_graphics::context::CGContext,
+            x: f64,
+            y: f64,
+            w: f64,
+            h: f64,
+            r: f64,
+            fill: bool,
+        ) {
             if r <= 0.0 {
                 let rect = core_graphics::geometry::CGRect::new(
                     &core_graphics::geometry::CGPoint::new(x, y),
@@ -606,7 +636,10 @@ impl BarView {
         }
 
         // First pass: collect group bounds
-        let mut group_bounds: std::collections::HashMap<String, (f64, f64, f64, f64, (f64, f64, f64, f64), f64)> = std::collections::HashMap::new();
+        let mut group_bounds: std::collections::HashMap<
+            String,
+            (f64, f64, f64, f64, (f64, f64, f64, f64), f64),
+        > = std::collections::HashMap::new();
         for positioned in &cache.modules {
             if let Some(ref group) = positioned.group {
                 if let Some(bg) = positioned.style.background {
@@ -629,21 +662,33 @@ impl BarView {
         for (_group_id, (min_x, max_x, radius, _padding, bg, _border_width)) in &group_bounds {
             let (r, g, b, a) = *bg;
             ctx.set_rgb_fill_color(r, g, b, a);
-            draw_rounded_rect(&mut ctx, *min_x, 2.0, max_x - min_x, bar_height - 4.0, *radius, true);
+            draw_rounded_rect(
+                &mut ctx,
+                *min_x,
+                2.0,
+                max_x - min_x,
+                bar_height - 4.0,
+                *radius,
+                true,
+            );
         }
 
         // Draw modules
         for positioned in &cache.modules {
             let module_bounds = (positioned.x, 0.0, positioned.width, bar_height);
-            let is_module_hovering = state.mouse_position.map_or(false, |p| {
-                positioned.contains_point(p.x)
-            });
+            let is_module_hovering = state
+                .mouse_position
+                .map_or(false, |p| positioned.contains_point(p.x));
 
             // Skip individual background if part of a group
-            let in_group = positioned.group.is_some() && group_bounds.contains_key(positioned.group.as_ref().unwrap());
+            let in_group = positioned.group.is_some()
+                && group_bounds.contains_key(positioned.group.as_ref().unwrap());
 
             // Draw module background if configured and not in a group
-            if !in_group && (positioned.style.background.is_some() || positioned.style.border_color.is_some()) {
+            if !in_group
+                && (positioned.style.background.is_some()
+                    || positioned.style.border_color.is_some())
+            {
                 let padding = positioned.style.padding;
                 let bg_x = positioned.x - padding;
                 let bg_y = 2.0;
@@ -781,14 +826,17 @@ pub fn handle_mouse_event(
             if let Some(cmd) = click_command {
                 log::info!("Executing click command: {}", cmd);
                 std::thread::spawn(move || {
-                    let _ = std::process::Command::new("sh")
-                        .args(["-c", &cmd])
-                        .spawn();
+                    let _ = std::process::Command::new("sh").args(["-c", &cmd]).spawn();
                 });
             }
             // Return popup info on left click
             if let Some(ref info) = popup_info {
-                log::debug!("Returning popup_info: type={}, x={}, width={}", info.popup_type, info.module_x, info.module_width);
+                log::debug!(
+                    "Returning popup_info: type={}, x={}, width={}",
+                    info.popup_type,
+                    info.module_x,
+                    info.module_width
+                );
             } else {
                 log::debug!("No popup_info to return");
             }
@@ -798,9 +846,7 @@ pub fn handle_mouse_event(
             if let Some(cmd) = right_click_command {
                 log::info!("Executing right-click command: {}", cmd);
                 std::thread::spawn(move || {
-                    let _ = std::process::Command::new("sh")
-                        .args(["-c", &cmd])
-                        .spawn();
+                    let _ = std::process::Command::new("sh").args(["-c", &cmd]).spawn();
                 });
             }
         }

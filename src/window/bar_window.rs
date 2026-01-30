@@ -1,6 +1,8 @@
 use objc2::rc::Retained;
-use objc2::{define_class, msg_send, MainThreadMarker, MainThreadOnly};
-use objc2_app_kit::{NSBackingStoreType, NSColor, NSWindow, NSWindowCollectionBehavior, NSWindowStyleMask};
+use objc2::{MainThreadMarker, MainThreadOnly, define_class, msg_send};
+use objc2_app_kit::{
+    NSBackingStoreType, NSColor, NSWindow, NSWindowCollectionBehavior, NSWindowStyleMask,
+};
 use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
 
 use super::screen::ScreenInfo;
@@ -73,11 +75,7 @@ define_class!(
 );
 
 impl RustyBarWindow {
-    fn new(
-        mtm: MainThreadMarker,
-        frame: NSRect,
-        style: NSWindowStyleMask,
-    ) -> Retained<Self> {
+    fn new(mtm: MainThreadMarker, frame: NSRect, style: NSWindowStyleMask) -> Retained<Self> {
         unsafe {
             msg_send![
                 Self::alloc(mtm),
@@ -124,9 +122,7 @@ impl BarWindow {
         // Use our custom window class that can become key window
         let custom_window = RustyBarWindow::new(mtm, frame, style);
         // Cast to NSWindow for the rest of the code
-        let window: Retained<NSWindow> = unsafe {
-            Retained::cast(custom_window)
-        };
+        let window: Retained<NSWindow> = unsafe { Retained::cast_unchecked(custom_window) };
 
         // Set window level to status bar level
         window.setLevel(STATUS_WINDOW_LEVEL);
@@ -170,7 +166,10 @@ impl BarWindow {
     pub fn show(&self) {
         log::debug!("Showing window, isVisible={}", self.window.isVisible());
         self.window.orderFrontRegardless();
-        log::debug!("After orderFrontRegardless, isVisible={}", self.window.isVisible());
+        log::debug!(
+            "After orderFrontRegardless, isVisible={}",
+            self.window.isVisible()
+        );
     }
 
     pub fn set_content_view(&self, view: &objc2_app_kit::NSView) {

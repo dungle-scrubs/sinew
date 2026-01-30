@@ -5,7 +5,7 @@
 
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
-use objc2::{msg_send, ClassType};
+use objc2::{ClassType, msg_send};
 use objc2_app_kit::{NSEvent, NSEventMask, NSEventType};
 use objc2_foundation::NSPoint;
 use std::sync::{Arc, Mutex};
@@ -78,12 +78,7 @@ impl MouseMonitor {
         let last_window_clone = last_window.clone();
 
         let global_handler = block2::RcBlock::new(move |event: &NSEvent| {
-            Self::handle_event(
-                event,
-                &windows_clone,
-                &callback_clone,
-                &last_window_clone,
-            );
+            Self::handle_event(event, &windows_clone, &callback_clone, &last_window_clone);
         });
 
         // Add the global monitor

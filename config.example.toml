@@ -22,3 +22,10 @@ format = "%a %b %d  %H:%M:%S"
 
 # Position: "left", "center", or "right"
 position = "right"
+
+# Example weather module configuration:
+# [[modules.left.left]]
+# type = "weather"
+# location = "auto"           # or "New York", "London", etc.
+# update_interval = 600       # seconds (10 min default)
+# show_while_loading = true   # true = show "Loading...", false = hidden until loaded

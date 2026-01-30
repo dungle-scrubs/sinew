@@ -102,10 +102,25 @@ pub struct ModuleConfig {
     pub popup: Option<String>,
     /// Popup width in pixels
     pub popup_width: Option<f64>,
-    /// Popup height in pixels
+    /// Popup height in pixels (deprecated, use popup_max_height instead)
     pub popup_height: Option<f64>,
+    /// Maximum popup height as percentage of available space (0-100, default 50)
+    pub popup_max_height: Option<f64>,
     /// Command to run for popup content (for "script" popup type)
     pub popup_command: Option<String>,
+    /// Popup anchor position: "left", "center", "right" (default "center")
+    pub popup_anchor: Option<String>,
+    /// Location for weather module (e.g., "New York", "London", or "auto" for auto-detect)
+    pub location: Option<String>,
+    /// Update interval in seconds for weather module
+    pub update_interval: Option<u64>,
+    /// Show module while loading (true = show "Loading...", false = hidden until loaded)
+    #[serde(default = "default_show_while_loading")]
+    pub show_while_loading: bool,
+}
+
+fn default_show_while_loading() -> bool {
+    true
 }
 
 impl Default for Config {

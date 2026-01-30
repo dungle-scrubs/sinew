@@ -11,6 +11,7 @@ mod script;
 mod separator;
 mod static_text;
 mod volume;
+mod weather;
 mod wifi;
 mod window_title;
 
@@ -27,6 +28,7 @@ pub use script::Script;
 pub use separator::Separator;
 pub use static_text::StaticText;
 pub use volume::Volume;
+pub use weather::Weather;
 pub use wifi::Wifi;
 pub use window_title::WindowTitle;
 
@@ -260,17 +262,30 @@ pub struct ModuleStyle {
     pub warning_threshold: f64,
 }
 
+/// Popup anchor position
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PopupAnchor {
+    Left,
+    #[default]
+    Center,
+    Right,
+}
+
 /// Popup configuration for a module
 #[derive(Debug, Clone, Default)]
 pub struct PopupConfig {
-    /// Popup type: "calendar", "info", "script"
+    /// Popup type: "calendar", "info", "script", "panel"
     pub popup_type: Option<String>,
     /// Popup width
     pub width: f64,
-    /// Popup height
+    /// Popup height (deprecated, use max_height_percent instead)
     pub height: f64,
+    /// Maximum height as percentage of available space (0-100, default 50)
+    pub max_height_percent: f64,
     /// Command for script-type popup
     pub command: Option<String>,
+    /// Anchor position: left, center, right
+    pub anchor: PopupAnchor,
 }
 
 /// Result of creating a module from config
@@ -420,6 +435,18 @@ pub fn create_module_from_config(
                 text_color,
             )))
         }
+        "weather" => {
+            let location = config.location.as_deref().unwrap_or("auto");
+            let update_interval = config.update_interval.unwrap_or(600); // 10 min default
+            Some(Box::new(Weather::new(
+                location,
+                update_interval,
+                config.show_while_loading,
+                font_family,
+                font_size,
+                text_color,
+            )))
+        }
         unknown => {
             log::warn!("Unknown module type: {}", unknown);
             None
@@ -452,11 +479,20 @@ pub fn create_module_from_config(
     };
 
     // Parse popup config if present
-    let popup = config.popup.as_ref().map(|popup_type| PopupConfig {
-        popup_type: Some(popup_type.clone()),
-        width: config.popup_width.unwrap_or(200.0),
-        height: config.popup_height.unwrap_or(150.0),
-        command: config.popup_command.clone(),
+    let popup = config.popup.as_ref().map(|popup_type| {
+        let anchor = match config.popup_anchor.as_deref() {
+            Some("left") => PopupAnchor::Left,
+            Some("right") => PopupAnchor::Right,
+            _ => PopupAnchor::Center,
+        };
+        PopupConfig {
+            popup_type: Some(popup_type.clone()),
+            width: config.popup_width.unwrap_or(200.0),
+            height: config.popup_height.unwrap_or(150.0),
+            max_height_percent: config.popup_max_height.unwrap_or(50.0).clamp(0.0, 100.0),
+            command: config.popup_command.clone(),
+            anchor,
+        }
     });
 
     module.map(|m| CreatedModule {

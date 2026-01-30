@@ -332,6 +332,43 @@ pub struct CreatedModule {
     pub toggle_group: Option<String>,
 }
 
+/// Context for creating modules - holds common parameters
+struct ModuleContext<'a> {
+    id: String,
+    font_family: &'a str,
+    font_size: f64,
+    text_color: &'a str,
+}
+
+impl<'a> ModuleContext<'a> {
+    fn new(
+        config: &'a ModuleConfig,
+        index: usize,
+        bar_font_family: &'a str,
+        bar_font_size: f64,
+        bar_text_color: &'a str,
+    ) -> Self {
+        Self {
+            id: config
+                .id
+                .clone()
+                .unwrap_or_else(|| format!("{}-{}", config.module_type, index)),
+            font_family: bar_font_family,
+            font_size: config.font_size.unwrap_or(bar_font_size),
+            text_color: config.color.as_deref().unwrap_or(bar_text_color),
+        }
+    }
+
+    /// Create a simple module that only needs font parameters
+    fn simple<F, M>(&self, f: F) -> Box<dyn Module>
+    where
+        F: FnOnce(&str, f64, &str) -> M,
+        M: Module + 'static,
+    {
+        Box::new(f(self.font_family, self.font_size, self.text_color))
+    }
+}
+
 /// Create a module from config
 pub fn create_module_from_config(
     config: &ModuleConfig,
@@ -340,107 +377,92 @@ pub fn create_module_from_config(
     bar_font_size: f64,
     bar_text_color: &str,
 ) -> Option<CreatedModule> {
-    let id = config
-        .id
-        .clone()
-        .unwrap_or_else(|| format!("{}-{}", config.module_type, index));
-    let font_family = bar_font_family;
-    let font_size = config.font_size.unwrap_or(bar_font_size);
-    let text_color = config.color.as_deref().unwrap_or(bar_text_color);
+    let ctx = ModuleContext::new(
+        config,
+        index,
+        bar_font_family,
+        bar_font_size,
+        bar_text_color,
+    );
 
     let module: Option<Box<dyn Module>> = match config.module_type.as_str() {
+        // Simple modules - just need font parameters
+        "battery" => Some(ctx.simple(Battery::new)),
+        "cpu" => Some(ctx.simple(Cpu::new)),
+        "memory" => Some(ctx.simple(Memory::new)),
+        "volume" => Some(ctx.simple(Volume::new)),
+        "network" => Some(ctx.simple(Network::new)),
+        "wifi" => Some(ctx.simple(Wifi::new)),
+
+        // Format-based modules
         "clock" => {
             let format = config.format.as_deref().unwrap_or("%a %b %d  %H:%M:%S");
             Some(Box::new(Clock::new(
                 format,
-                font_family,
-                font_size,
-                text_color,
+                ctx.font_family,
+                ctx.font_size,
+                ctx.text_color,
             )))
         }
-        "static" => {
-            let text = config.text.as_deref().unwrap_or("");
-            let icon = config.icon.as_deref();
-            Some(Box::new(StaticText::new(
-                &id,
-                text,
-                icon,
-                font_family,
-                font_size,
-                text_color,
-            )))
-        }
-        "battery" => Some(Box::new(Battery::new(font_family, font_size, text_color))),
-        "cpu" => Some(Box::new(Cpu::new(font_family, font_size, text_color))),
-        "memory" => Some(Box::new(Memory::new(font_family, font_size, text_color))),
-        "separator" => {
-            // Default to space separator, or parse type from config
-            let sep_type = config.separator_type.as_deref().unwrap_or("space");
-            let sep_width = config.separator_width.unwrap_or(8.0);
-            let sep_color = config.separator_color.as_deref().unwrap_or("#666666");
-
-            let separator = match sep_type {
-                "line" => Separator::line(
-                    &id,
-                    sep_width,
-                    sep_color,
-                    font_family,
-                    font_size,
-                    text_color,
-                ),
-                "dot" => Separator::dot(
-                    &id,
-                    sep_width,
-                    sep_color,
-                    font_family,
-                    font_size,
-                    text_color,
-                ),
-                "icon" => {
-                    let icon = config.icon.as_deref().unwrap_or("│");
-                    Separator::icon(&id, icon, font_family, font_size, text_color)
-                }
-                _ => Separator::space(&id, sep_width, font_family, font_size, text_color),
-            };
-            Some(Box::new(separator))
-        }
-        "volume" => Some(Box::new(Volume::new(font_family, font_size, text_color))),
-        "disk" => {
-            let path = config.path.as_deref().unwrap_or("/");
-            Some(Box::new(Disk::new(
-                path,
-                font_family,
-                font_size,
-                text_color,
-            )))
-        }
-        "network" => Some(Box::new(Network::new(font_family, font_size, text_color))),
-        "wifi" => Some(Box::new(Wifi::new(font_family, font_size, text_color))),
         "date" => {
             let format = config.format.as_deref().unwrap_or("%a %b %d");
             Some(Box::new(Date::new(
                 format,
-                font_family,
-                font_size,
-                text_color,
+                ctx.font_family,
+                ctx.font_size,
+                ctx.text_color,
             )))
         }
+
+        // Max-length modules
         "app_name" => {
             let max_len = config.max_length.map(|v| v as usize);
             Some(Box::new(AppName::new(
                 max_len,
-                font_family,
-                font_size,
-                text_color,
+                ctx.font_family,
+                ctx.font_size,
+                ctx.text_color,
+            )))
+        }
+        "window_title" => {
+            let max_len = config.max_length.map(|v| v as usize);
+            Some(Box::new(WindowTitle::new(
+                max_len,
+                ctx.font_family,
+                ctx.font_size,
+                ctx.text_color,
             )))
         }
         "now_playing" => {
             let max_len = config.max_length.map(|v| v as usize);
             Some(Box::new(NowPlaying::new(
                 max_len,
-                font_family,
-                font_size,
-                text_color,
+                ctx.font_family,
+                ctx.font_size,
+                ctx.text_color,
+            )))
+        }
+
+        // Custom modules with specific config
+        "static" => {
+            let text = config.text.as_deref().unwrap_or("");
+            let icon = config.icon.as_deref();
+            Some(Box::new(StaticText::new(
+                &ctx.id,
+                text,
+                icon,
+                ctx.font_family,
+                ctx.font_size,
+                ctx.text_color,
+            )))
+        }
+        "disk" => {
+            let path = config.path.as_deref().unwrap_or("/");
+            Some(Box::new(Disk::new(
+                path,
+                ctx.font_family,
+                ctx.font_size,
+                ctx.text_color,
             )))
         }
         "script" => {
@@ -448,35 +470,68 @@ pub fn create_module_from_config(
             let interval = config.interval.map(|v| v as u64);
             let icon = config.icon.as_deref();
             Some(Box::new(Script::new(
-                &id,
+                &ctx.id,
                 command,
                 interval,
                 icon,
-                font_family,
-                font_size,
-                text_color,
-            )))
-        }
-        "window_title" => {
-            let max_len = config.max_length.map(|v| v as usize);
-            Some(Box::new(WindowTitle::new(
-                max_len,
-                font_family,
-                font_size,
-                text_color,
+                ctx.font_family,
+                ctx.font_size,
+                ctx.text_color,
             )))
         }
         "weather" => {
             let location = config.location.as_deref().unwrap_or("auto");
-            let update_interval = config.update_interval.unwrap_or(600); // 10 min default
+            let update_interval = config.update_interval.unwrap_or(600);
             Some(Box::new(Weather::new(
                 location,
                 update_interval,
                 config.show_while_loading,
-                font_family,
-                font_size,
-                text_color,
+                ctx.font_family,
+                ctx.font_size,
+                ctx.text_color,
             )))
+        }
+        "separator" => {
+            let sep_type = config.separator_type.as_deref().unwrap_or("space");
+            let sep_width = config.separator_width.unwrap_or(8.0);
+            let sep_color = config.separator_color.as_deref().unwrap_or("#666666");
+
+            let separator = match sep_type {
+                "line" => Separator::line(
+                    &ctx.id,
+                    sep_width,
+                    sep_color,
+                    ctx.font_family,
+                    ctx.font_size,
+                    ctx.text_color,
+                ),
+                "dot" => Separator::dot(
+                    &ctx.id,
+                    sep_width,
+                    sep_color,
+                    ctx.font_family,
+                    ctx.font_size,
+                    ctx.text_color,
+                ),
+                "icon" => {
+                    let icon = config.icon.as_deref().unwrap_or("│");
+                    Separator::icon(
+                        &ctx.id,
+                        icon,
+                        ctx.font_family,
+                        ctx.font_size,
+                        ctx.text_color,
+                    )
+                }
+                _ => Separator::space(
+                    &ctx.id,
+                    sep_width,
+                    ctx.font_family,
+                    ctx.font_size,
+                    ctx.text_color,
+                ),
+            };
+            Some(Box::new(separator))
         }
         unknown => {
             log::warn!("Unknown module type: {}", unknown);

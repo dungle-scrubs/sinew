@@ -11,11 +11,29 @@ use objc2_foundation::{NSPoint, NSRect, NSSize};
 pub struct Panel {
     window: Retained<NSWindow>,
     is_visible: bool,
+    bar_y: f64,
+    screen_width: f64,
 }
 
 impl Panel {
-    /// Create a new panel
-    pub fn new(mtm: MainThreadMarker, screen_width: f64, bar_y: f64, panel_height: f64) -> Self {
+    /// Create a new panel with dynamic height based on content
+    ///
+    /// # Arguments
+    /// * `mtm` - Main thread marker
+    /// * `screen_width` - Width of the screen
+    /// * `bar_y` - Y position of the bar (bottom of bar)
+    /// * `content_height` - The height needed by the content
+    /// * `max_height` - Maximum panel height (typically 50% of screen)
+    pub fn new(
+        mtm: MainThreadMarker,
+        screen_width: f64,
+        bar_y: f64,
+        content_height: f64,
+        max_height: f64,
+    ) -> Self {
+        // Use content height up to max_height
+        let panel_height = content_height.min(max_height);
+
         // Position below the bar
         let frame = NSRect::new(
             NSPoint::new(0.0, bar_y - panel_height),
@@ -56,7 +74,19 @@ impl Panel {
         Self {
             window,
             is_visible: false,
+            bar_y,
+            screen_width,
         }
+    }
+
+    /// Resize the panel to fit new content, respecting max_height
+    pub fn resize_for_content(&mut self, content_height: f64, max_height: f64) {
+        let panel_height = content_height.min(max_height);
+        let frame = NSRect::new(
+            NSPoint::new(0.0, self.bar_y - panel_height),
+            NSSize::new(self.screen_width, panel_height),
+        );
+        self.window.setFrame_display(frame, self.is_visible);
     }
 
     /// Show the panel

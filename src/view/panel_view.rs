@@ -95,29 +95,15 @@ define_class!(
 );
 
 impl PanelView {
-    pub fn new(mtm: MainThreadMarker, content: PanelContent) -> Retained<Self> {
+    /// Create a new panel view and return the view along with its preferred content height
+    pub fn new(mtm: MainThreadMarker, content: PanelContent) -> (Retained<Self>, f64) {
         let view: Retained<Self> = unsafe { msg_send![Self::alloc(mtm), init] };
 
         let view_id = &*view as *const _ as usize;
 
         let graphics = Graphics::new("#1a1b26", "#c8cdd5", "SF Pro", 14.0);
 
-        let line_height = 22.0;
-        let padding = 20.0;
-        let content_height = match &content {
-            PanelContent::Text(lines) => padding * 2.0 + (lines.len() as f64) * line_height,
-            PanelContent::Calendar { .. } => 300.0, // Fixed height
-            PanelContent::SystemInfo => 200.0,
-            PanelContent::Sections(sections) => {
-                let mut h = padding;
-                for section in sections {
-                    h += 30.0; // Section title
-                    h += (section.items.len() as f64) * 24.0;
-                    h += 15.0; // Section spacing
-                }
-                h + padding
-            }
-        };
+        let content_height = Self::calculate_content_height(&content);
 
         let state = PanelState {
             content,
@@ -130,7 +116,28 @@ impl PanelView {
             states.borrow_mut().insert(view_id, state);
         });
 
-        view
+        (view, content_height)
+    }
+
+    /// Calculate the height needed to display the content
+    fn calculate_content_height(content: &PanelContent) -> f64 {
+        let line_height = 22.0;
+        let padding = 20.0;
+
+        match content {
+            PanelContent::Text(lines) => padding * 2.0 + (lines.len() as f64) * line_height,
+            PanelContent::Calendar { .. } => 300.0,
+            PanelContent::SystemInfo => 200.0,
+            PanelContent::Sections(sections) => {
+                let mut h = padding;
+                for section in sections {
+                    h += 30.0; // Section title
+                    h += (section.items.len() as f64) * 24.0;
+                    h += 15.0; // Section spacing
+                }
+                h + padding
+            }
+        }
     }
 
     pub fn set_content(&self, content: PanelContent) {

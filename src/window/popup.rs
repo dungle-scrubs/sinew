@@ -11,8 +11,16 @@ pub struct PopupWindow {
 }
 
 impl PopupWindow {
-    /// Create a new popup window
-    pub fn new(mtm: MainThreadMarker, width: f64, height: f64) -> Self {
+    /// Create a new popup window with dynamic height
+    ///
+    /// # Arguments
+    /// * `mtm` - Main thread marker
+    /// * `width` - Popup width
+    /// * `content_height` - The height needed by the content
+    /// * `max_height` - Maximum popup height (based on available space)
+    pub fn new(mtm: MainThreadMarker, width: f64, content_height: f64, max_height: f64) -> Self {
+        // Use content height up to max_height
+        let height = content_height.min(max_height);
         let frame = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(width, height));
         let style = NSWindowStyleMask::Borderless;
 
@@ -49,10 +57,15 @@ impl PopupWindow {
         Self { window }
     }
 
-    /// Show the popup at the given position (below the bar)
-    pub fn show_at(&self, x: f64, y: f64) {
+    /// Show the popup at the given position (directly below the bar)
+    ///
+    /// # Arguments
+    /// * `center_x` - X position to center the popup on
+    /// * `bar_y` - Y position of the bar bottom (popup top aligns here)
+    pub fn show_at(&self, center_x: f64, bar_y: f64) {
         let frame = self.window.frame();
-        let new_origin = NSPoint::new(x - frame.size.width / 2.0, y - frame.size.height);
+        // Center horizontally on center_x, position directly below bar
+        let new_origin = NSPoint::new(center_x - frame.size.width / 2.0, bar_y - frame.size.height);
         self.window.setFrameOrigin(new_origin);
         self.window.orderFront(None);
     }

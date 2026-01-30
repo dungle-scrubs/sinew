@@ -84,7 +84,8 @@ define_class!(
 );
 
 impl PopupView {
-    pub fn new(mtm: MainThreadMarker, content: PopupContent) -> Retained<Self> {
+    /// Create a new popup view and return the view along with its preferred content height
+    pub fn new(mtm: MainThreadMarker, content: PopupContent) -> (Retained<Self>, f64) {
         let view: Retained<Self> = unsafe { msg_send![Self::alloc(mtm), init] };
 
         let view_id = &*view as *const _ as usize;
@@ -96,14 +97,7 @@ impl PopupView {
             13.0,      // font_size
         );
 
-        let padding = 12.0;
-        let line_height = 20.0;
-        let content_height = match &content {
-            PopupContent::Text(lines) => padding * 2.0 + (lines.len() as f64) * line_height,
-            PopupContent::Info(pairs) => padding * 2.0 + (pairs.len() as f64) * line_height,
-            PopupContent::Calendar { .. } => 200.0, // Fixed height for calendar
-            PopupContent::Loading => 50.0,
-        };
+        let content_height = Self::calculate_content_height(&content);
 
         let state = PopupState {
             content,
@@ -118,7 +112,20 @@ impl PopupView {
             states.borrow_mut().insert(view_id, state);
         });
 
-        view
+        (view, content_height)
+    }
+
+    /// Calculate the height needed to display the content
+    fn calculate_content_height(content: &PopupContent) -> f64 {
+        let padding = 12.0;
+        let line_height = 20.0;
+
+        match content {
+            PopupContent::Text(lines) => padding * 2.0 + (lines.len() as f64) * line_height,
+            PopupContent::Info(pairs) => padding * 2.0 + (pairs.len() as f64) * line_height,
+            PopupContent::Calendar { .. } => 200.0,
+            PopupContent::Loading => 50.0,
+        }
     }
 
     pub fn set_content(&self, content: PopupContent) {

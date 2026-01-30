@@ -1,6 +1,6 @@
 mod types;
 
-pub use types::{parse_hex_color, Config, ModuleConfig};
+pub use types::{parse_hex_color, Config, ConfigIssue, ModuleConfig};
 
 use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
 use std::path::PathBuf;
@@ -12,26 +12,49 @@ pub type SharedConfig = Arc<RwLock<Config>>;
 pub fn load_config() -> Config {
     let config_path = get_config_path();
 
-    if config_path.exists() {
+    let config = if config_path.exists() {
         match std::fs::read_to_string(&config_path) {
             Ok(contents) => match toml::from_str(&contents) {
                 Ok(config) => {
                     log::info!("Loaded config from {:?}", config_path);
-                    return config;
+                    config
                 }
                 Err(e) => {
                     log::error!("Failed to parse config: {}", e);
+                    Config::default()
                 }
             },
             Err(e) => {
                 log::error!("Failed to read config file: {}", e);
+                Config::default()
             }
         }
     } else {
         log::info!("No config file found at {:?}, using defaults", config_path);
+        Config::default()
+    };
+
+    // Validate configuration and report issues
+    let issues = config.validate();
+    let errors: Vec<_> = issues.iter().filter(|i| i.is_error).collect();
+    let warnings: Vec<_> = issues.iter().filter(|i| !i.is_error).collect();
+
+    for warning in &warnings {
+        log::warn!("Config: {}", warning);
+    }
+    for error in &errors {
+        log::error!("Config: {}", error);
     }
 
-    Config::default()
+    if !issues.is_empty() {
+        log::info!(
+            "Config validation: {} error(s), {} warning(s)",
+            errors.len(),
+            warnings.len()
+        );
+    }
+
+    config
 }
 
 pub fn get_config_path() -> PathBuf {

@@ -1,5 +1,49 @@
 use serde::Deserialize;
 
+/// Known module types
+const KNOWN_MODULE_TYPES: &[&str] = &[
+    "clock",
+    "date",
+    "static",
+    "battery",
+    "cpu",
+    "memory",
+    "disk",
+    "network",
+    "wifi",
+    "volume",
+    "app_name",
+    "window_title",
+    "now_playing",
+    "script",
+    "weather",
+    "separator",
+];
+
+/// Known separator types
+const KNOWN_SEPARATOR_TYPES: &[&str] = &["space", "line", "dot", "icon"];
+
+/// Known popup types
+const KNOWN_POPUP_TYPES: &[&str] = &["calendar", "info", "script", "panel"];
+
+/// Known popup anchor positions
+const KNOWN_POPUP_ANCHORS: &[&str] = &["left", "center", "right"];
+
+/// A configuration warning or error
+#[derive(Debug, Clone)]
+pub struct ConfigIssue {
+    pub path: String,
+    pub message: String,
+    pub is_error: bool,
+}
+
+impl std::fmt::Display for ConfigIssue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let level = if self.is_error { "ERROR" } else { "WARNING" };
+        write!(f, "[{}] {}: {}", level, self.path, self.message)
+    }
+}
+
 #[derive(Debug, Deserialize, Clone)]
 pub struct Config {
     #[serde(default)]
@@ -141,6 +185,277 @@ impl Default for Config {
             modules: ModulesConfig::default(),
             clock: ClockConfig::default(),
         }
+    }
+}
+
+impl Config {
+    /// Validate the configuration and return a list of issues (warnings and errors)
+    pub fn validate(&self) -> Vec<ConfigIssue> {
+        let mut issues = Vec::new();
+
+        // Validate bar config
+        self.bar.validate("bar", &mut issues);
+
+        // Validate modules
+        self.modules.validate("modules", &mut issues);
+
+        issues
+    }
+}
+
+impl BarConfig {
+    fn validate(&self, path: &str, issues: &mut Vec<ConfigIssue>) {
+        // Validate colors
+        validate_color(
+            &self.background_color,
+            &format!("{}.background_color", path),
+            issues,
+        );
+        validate_color(&self.text_color, &format!("{}.text_color", path), issues);
+
+        if let Some(ref color) = self.border_color {
+            validate_color(color, &format!("{}.border_color", path), issues);
+        }
+        if let Some(ref color) = self.popup_background_color {
+            validate_color(color, &format!("{}.popup_background_color", path), issues);
+        }
+        if let Some(ref color) = self.popup_text_color {
+            validate_color(color, &format!("{}.popup_text_color", path), issues);
+        }
+
+        // Validate notch config
+        validate_color(&self.notch.color, &format!("{}.notch.color", path), issues);
+
+        // Validate numeric ranges
+        if self.font_size <= 0.0 {
+            issues.push(ConfigIssue {
+                path: format!("{}.font_size", path),
+                message: format!("font_size must be positive, got {}", self.font_size),
+                is_error: true,
+            });
+        }
+        if self.padding < 0.0 {
+            issues.push(ConfigIssue {
+                path: format!("{}.padding", path),
+                message: format!("padding cannot be negative, got {}", self.padding),
+                is_error: true,
+            });
+        }
+        if self.border_width < 0.0 {
+            issues.push(ConfigIssue {
+                path: format!("{}.border_width", path),
+                message: format!("border_width cannot be negative, got {}", self.border_width),
+                is_error: true,
+            });
+        }
+    }
+}
+
+impl ModulesConfig {
+    fn validate(&self, path: &str, issues: &mut Vec<ConfigIssue>) {
+        // Validate left half
+        for (i, module) in self.left.outer.iter().enumerate() {
+            module.validate(&format!("{}.left.left[{}]", path, i), issues);
+        }
+        for (i, module) in self.left.inner.iter().enumerate() {
+            module.validate(&format!("{}.left.right[{}]", path, i), issues);
+        }
+
+        // Validate right half
+        for (i, module) in self.right.outer.iter().enumerate() {
+            module.validate(&format!("{}.right.left[{}]", path, i), issues);
+        }
+        for (i, module) in self.right.inner.iter().enumerate() {
+            module.validate(&format!("{}.right.right[{}]", path, i), issues);
+        }
+    }
+}
+
+impl ModuleConfig {
+    fn validate(&self, path: &str, issues: &mut Vec<ConfigIssue>) {
+        // Validate module type
+        if !KNOWN_MODULE_TYPES.contains(&self.module_type.as_str()) {
+            issues.push(ConfigIssue {
+                path: format!("{}.type", path),
+                message: format!(
+                    "unknown module type '{}', expected one of: {}",
+                    self.module_type,
+                    KNOWN_MODULE_TYPES.join(", ")
+                ),
+                is_error: true,
+            });
+        }
+
+        // Validate colors
+        if let Some(ref color) = self.color {
+            validate_color(color, &format!("{}.color", path), issues);
+        }
+        if let Some(ref color) = self.background {
+            validate_color(color, &format!("{}.background", path), issues);
+        }
+        if let Some(ref color) = self.border_color {
+            validate_color(color, &format!("{}.border_color", path), issues);
+        }
+        if let Some(ref color) = self.separator_color {
+            validate_color(color, &format!("{}.separator_color", path), issues);
+        }
+        if let Some(ref color) = self.critical_color {
+            validate_color(color, &format!("{}.critical_color", path), issues);
+        }
+        if let Some(ref color) = self.warning_color {
+            validate_color(color, &format!("{}.warning_color", path), issues);
+        }
+        if let Some(ref color) = self.active_background {
+            validate_color(color, &format!("{}.active_background", path), issues);
+        }
+        if let Some(ref color) = self.active_border_color {
+            validate_color(color, &format!("{}.active_border_color", path), issues);
+        }
+        if let Some(ref color) = self.active_color {
+            validate_color(color, &format!("{}.active_color", path), issues);
+        }
+
+        // Validate separator_type
+        if let Some(ref sep_type) = self.separator_type {
+            if !KNOWN_SEPARATOR_TYPES.contains(&sep_type.as_str()) {
+                issues.push(ConfigIssue {
+                    path: format!("{}.separator_type", path),
+                    message: format!(
+                        "unknown separator_type '{}', expected one of: {}",
+                        sep_type,
+                        KNOWN_SEPARATOR_TYPES.join(", ")
+                    ),
+                    is_error: false, // Warning, will default to "space"
+                });
+            }
+        }
+
+        // Validate popup type
+        if let Some(ref popup_type) = self.popup {
+            if !KNOWN_POPUP_TYPES.contains(&popup_type.as_str()) {
+                issues.push(ConfigIssue {
+                    path: format!("{}.popup", path),
+                    message: format!(
+                        "unknown popup type '{}', expected one of: {}",
+                        popup_type,
+                        KNOWN_POPUP_TYPES.join(", ")
+                    ),
+                    is_error: false,
+                });
+            }
+        }
+
+        // Validate popup_anchor
+        if let Some(ref anchor) = self.popup_anchor {
+            if !KNOWN_POPUP_ANCHORS.contains(&anchor.as_str()) {
+                issues.push(ConfigIssue {
+                    path: format!("{}.popup_anchor", path),
+                    message: format!(
+                        "unknown popup_anchor '{}', expected one of: {}",
+                        anchor,
+                        KNOWN_POPUP_ANCHORS.join(", ")
+                    ),
+                    is_error: false,
+                });
+            }
+        }
+
+        // Validate thresholds (0-100)
+        if let Some(threshold) = self.critical_threshold {
+            if !(0.0..=100.0).contains(&threshold) {
+                issues.push(ConfigIssue {
+                    path: format!("{}.critical_threshold", path),
+                    message: format!("critical_threshold should be 0-100, got {}", threshold),
+                    is_error: false,
+                });
+            }
+        }
+        if let Some(threshold) = self.warning_threshold {
+            if !(0.0..=100.0).contains(&threshold) {
+                issues.push(ConfigIssue {
+                    path: format!("{}.warning_threshold", path),
+                    message: format!("warning_threshold should be 0-100, got {}", threshold),
+                    is_error: false,
+                });
+            }
+        }
+
+        // Validate popup_max_height (0-100)
+        if let Some(max_height) = self.popup_max_height {
+            if !(0.0..=100.0).contains(&max_height) {
+                issues.push(ConfigIssue {
+                    path: format!("{}.popup_max_height", path),
+                    message: format!("popup_max_height should be 0-100, got {}", max_height),
+                    is_error: false,
+                });
+            }
+        }
+
+        // Validate positive numeric values
+        if let Some(size) = self.font_size {
+            if size <= 0.0 {
+                issues.push(ConfigIssue {
+                    path: format!("{}.font_size", path),
+                    message: format!("font_size must be positive, got {}", size),
+                    is_error: true,
+                });
+            }
+        }
+        if let Some(width) = self.border_width {
+            if width < 0.0 {
+                issues.push(ConfigIssue {
+                    path: format!("{}.border_width", path),
+                    message: format!("border_width cannot be negative, got {}", width),
+                    is_error: true,
+                });
+            }
+        }
+        if let Some(padding) = self.padding {
+            if padding < 0.0 {
+                issues.push(ConfigIssue {
+                    path: format!("{}.padding", path),
+                    message: format!("padding cannot be negative, got {}", padding),
+                    is_error: true,
+                });
+            }
+        }
+
+        // Module-specific validation
+        match self.module_type.as_str() {
+            "script" => {
+                if self.command.is_none() {
+                    issues.push(ConfigIssue {
+                        path: format!("{}.command", path),
+                        message: "script module requires 'command' field".to_string(),
+                        is_error: false, // Warning, will use default
+                    });
+                }
+            }
+            "static" => {
+                if self.text.is_none() && self.icon.is_none() {
+                    issues.push(ConfigIssue {
+                        path: path.to_string(),
+                        message: "static module should have 'text' and/or 'icon' field".to_string(),
+                        is_error: false,
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Validate a hex color string
+fn validate_color(color: &str, path: &str, issues: &mut Vec<ConfigIssue>) {
+    if parse_hex_color(color).is_none() {
+        issues.push(ConfigIssue {
+            path: path.to_string(),
+            message: format!(
+                "invalid color '{}', expected #RRGGBB or #RRGGBBAA format",
+                color
+            ),
+            is_error: true,
+        });
     }
 }
 

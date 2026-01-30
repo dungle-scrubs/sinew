@@ -168,9 +168,15 @@ impl BarWindow {
         self.window.orderFrontRegardless();
         // Set activation prevention AFTER window is shown
         prevent_window_activation(&self.window);
-        log::debug!(
-            "After orderFrontRegardless, isVisible={}",
-            self.window.isVisible()
+        let frame = self.window.frame();
+        log::info!(
+            "Window shown: visible={}, frame=({:.0}, {:.0}, {:.0}x{:.0}), level={}",
+            self.window.isVisible(),
+            frame.origin.x,
+            frame.origin.y,
+            frame.size.width,
+            frame.size.height,
+            self.window.level()
         );
     }
 

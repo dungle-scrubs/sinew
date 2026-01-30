@@ -3,7 +3,8 @@
 use objc2::rc::Retained;
 use objc2::{define_class, msg_send, MainThreadMarker, MainThreadOnly};
 use objc2_app_kit::{
-    NSBackingStoreType, NSColor, NSView, NSWindow, NSWindowCollectionBehavior, NSWindowStyleMask,
+    NSBackingStoreType, NSColor, NSView, NSWindow, NSWindowAnimationBehavior,
+    NSWindowCollectionBehavior, NSWindowStyleMask,
 };
 use objc2_foundation::{NSPoint, NSRect, NSSize};
 
@@ -82,6 +83,9 @@ impl Panel {
         window.setOpaque(false);
         window.setHasShadow(false); // No shadow - appears as extension of bar
 
+        // Disable all window animations for instant show/hide
+        window.setAnimationBehavior(NSWindowAnimationBehavior::None);
+
         // Set background color
         let bg_color = NSColor::colorWithSRGBRed_green_blue_alpha(0.1, 0.1, 0.14, 0.98);
         window.setBackgroundColor(Some(&bg_color));
@@ -121,7 +125,13 @@ impl Panel {
             return;
         }
         self.is_visible = true;
+        self.window.setAlphaValue(1.0);
         self.window.orderFront(None);
+        // Force display update
+        if let Some(view) = self.window.contentView() {
+            view.setNeedsDisplay(true);
+            view.displayIfNeeded();
+        }
     }
 
     /// Hide the panel
@@ -130,6 +140,7 @@ impl Panel {
             return;
         }
         self.is_visible = false;
+        // Use orderOut for immediate hide instead of alphaValue
         self.window.orderOut(None);
     }
 

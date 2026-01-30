@@ -1,10 +1,9 @@
 use super::{Module, ModuleSize, RenderContext};
 use crate::render::Graphics;
-use std::sync::Mutex;
+use crate::window::get_frontmost_app;
 
 pub struct AppName {
     graphics: Graphics,
-    cached_name: Mutex<String>,
     max_len: usize,
 }
 
@@ -18,27 +17,13 @@ impl AppName {
         let graphics = Graphics::new("#000000", text_color, font_family, font_size);
         Self {
             graphics,
-            cached_name: Mutex::new(String::new()),
             max_len: max_len.unwrap_or(20),
         }
     }
 
-    fn get_frontmost_app(&self) -> String {
-        // Use osascript to get frontmost app name
-        let output = std::process::Command::new("osascript")
-            .args(["-e", "tell application \"System Events\" to get name of first application process whose frontmost is true"])
-            .output()
-            .ok();
-
-        if let Some(output) = output {
-            String::from_utf8_lossy(&output.stdout).trim().to_string()
-        } else {
-            String::new()
-        }
-    }
-
     fn display_text(&self) -> String {
-        let name = self.cached_name.lock().unwrap();
+        // Read directly from global state (updated by workspace notification)
+        let name = get_frontmost_app();
         if name.is_empty() {
             return String::new();
         }
@@ -48,7 +33,7 @@ impl AppName {
             let truncated: String = name.chars().take(self.max_len - 1).collect();
             format!("{}…", truncated)
         } else {
-            name.clone()
+            name
         }
     }
 }
@@ -59,9 +44,9 @@ impl Module for AppName {
     }
 
     fn measure(&self) -> ModuleSize {
-        // Measure with max possible text
-        let sample = "A".repeat(self.max_len);
-        let width = self.graphics.measure_text(&sample);
+        // Measure actual displayed text
+        let text = self.display_text();
+        let width = self.graphics.measure_text(&text);
         let height = self.graphics.font_height();
         ModuleSize { width, height }
     }
@@ -85,8 +70,7 @@ impl Module for AppName {
     }
 
     fn update(&mut self) -> bool {
-        let name = self.get_frontmost_app();
-        *self.cached_name.lock().unwrap() = name;
-        true
+        // No-op: we read directly from global state on each draw
+        false
     }
 }

@@ -1,5 +1,5 @@
 use objc2::rc::Retained;
-use objc2::{MainThreadMarker, MainThreadOnly, define_class, msg_send};
+use objc2::{define_class, msg_send, MainThreadMarker, MainThreadOnly};
 use objc2_app_kit::{
     NSBackingStoreType, NSColor, NSWindow, NSWindowCollectionBehavior, NSWindowStyleMask,
 };
@@ -64,7 +64,7 @@ define_class!(
     impl RustyBarWindow {
         #[unsafe(method(canBecomeKeyWindow))]
         fn can_become_key_window(&self) -> bool {
-            true  // Need this to receive mouse events
+            false  // Prevent focus stealing - mouse events handled via global monitor
         }
 
         #[unsafe(method(canBecomeMainWindow))]
@@ -166,6 +166,8 @@ impl BarWindow {
     pub fn show(&self) {
         log::debug!("Showing window, isVisible={}", self.window.isVisible());
         self.window.orderFrontRegardless();
+        // Set activation prevention AFTER window is shown
+        prevent_window_activation(&self.window);
         log::debug!(
             "After orderFrontRegardless, isVisible={}",
             self.window.isVisible()

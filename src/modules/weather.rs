@@ -1,8 +1,9 @@
+use super::timer::UpdateTimer;
 use super::{Module, ModuleSize, RenderContext};
 use crate::render::Graphics;
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 #[derive(Clone)]
 pub enum WeatherState {
@@ -19,8 +20,7 @@ pub struct Weather {
     graphics: Graphics,
     state: Arc<Mutex<WeatherState>>,
     location: String,
-    update_interval: Duration,
-    last_fetch: Mutex<Option<Instant>>,
+    timer: UpdateTimer,
     show_while_loading: bool,
 }
 
@@ -50,12 +50,15 @@ impl Weather {
             *state = result;
         });
 
+        // Create timer and mark as just updated (initial fetch started)
+        let timer = UpdateTimer::with_duration(Duration::from_secs(update_interval_secs));
+        timer.reset();
+
         Self {
             graphics,
             state,
             location,
-            update_interval: Duration::from_secs(update_interval_secs),
-            last_fetch: Mutex::new(Some(Instant::now())),
+            timer,
             show_while_loading,
         }
     }
@@ -191,15 +194,7 @@ impl Module for Weather {
     }
 
     fn update(&mut self) -> bool {
-        let should_fetch = {
-            let last_fetch = self.last_fetch.lock().unwrap();
-            match *last_fetch {
-                None => true,
-                Some(time) => time.elapsed() >= self.update_interval,
-            }
-        };
-
-        if should_fetch {
+        if self.timer.is_due() {
             // Check if we're still loading from a previous fetch
             let is_loading = {
                 let state = self.state.lock().unwrap();
@@ -217,7 +212,7 @@ impl Module for Weather {
                     *state = result;
                 });
 
-                *self.last_fetch.lock().unwrap() = Some(Instant::now());
+                self.timer.reset();
             }
         }
 

@@ -1,15 +1,14 @@
+use super::timer::UpdateTimer;
 use super::{Module, ModuleSize, RenderContext};
 use crate::render::Graphics;
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
 
 pub struct Script {
     graphics: Graphics,
     id: String,
     command: String,
-    interval_secs: u64,
+    timer: UpdateTimer,
     cached_output: Mutex<String>,
-    last_run: Mutex<Option<Instant>>,
     icon: Option<String>,
 }
 
@@ -28,9 +27,8 @@ impl Script {
             graphics,
             id: id.to_string(),
             command: command.to_string(),
-            interval_secs: interval_secs.unwrap_or(10),
+            timer: UpdateTimer::new(interval_secs.unwrap_or(10)),
             cached_output: Mutex::new(String::new()),
-            last_run: Mutex::new(None),
             icon: icon.map(|s| s.to_string()),
         }
     }
@@ -94,18 +92,9 @@ impl Module for Script {
     }
 
     fn update(&mut self) -> bool {
-        let should_run = {
-            let last_run = self.last_run.lock().unwrap();
-            match *last_run {
-                None => true,
-                Some(time) => time.elapsed() >= Duration::from_secs(self.interval_secs),
-            }
-        };
-
-        if should_run {
+        if self.timer.should_update() {
             let output = self.run_command();
             *self.cached_output.lock().unwrap() = output;
-            *self.last_run.lock().unwrap() = Some(Instant::now());
             true
         } else {
             false

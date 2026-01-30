@@ -10,6 +10,7 @@ mod now_playing;
 mod script;
 mod separator;
 mod static_text;
+mod timer;
 mod volume;
 mod weather;
 mod wifi;

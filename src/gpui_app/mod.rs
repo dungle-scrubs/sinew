@@ -136,9 +136,9 @@ pub fn run() {
         // Create the calendar popup window (hidden by default)
         // Position it under the right bar area where the calendar button is
         let calendar_width = 280.0;
-        let calendar_max_height = (screen_height - bar_height) * 0.90; // Max 90% of available space
+        let calendar_max_height = (screen_height - bar_height) * 0.90;
         let calendar_content_height = modules::CalendarView::content_height() as f64;
-        let calendar_height = calendar_content_height.min(calendar_max_height); // Use content height, capped at max
+        let calendar_height = calendar_content_height.min(calendar_max_height);
         let calendar_x = screen_x + screen_width - calendar_width - 80.0; // Offset from right edge, under date module
 
         create_calendar_window(

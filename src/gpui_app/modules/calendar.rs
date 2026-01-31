@@ -19,14 +19,16 @@ use crate::gpui_app::theme::Theme;
 const MAX_TIME_OFFSET_MINUTES: i32 = 12 * 60;
 
 // Layout constants for height calculation
-const CALENDAR_HEADER_HEIGHT: f32 = 44.0;
-const CALENDAR_WEEKDAY_ROW_HEIGHT: f32 = 20.0;
-const CALENDAR_WEEK_ROW_HEIGHT: f32 = 40.0;
-const CALENDAR_WEEKS: f32 = 5.0;
-const CALENDAR_PADDING: f32 = 24.0;
-const TIMEZONE_SCRUB_BAR_HEIGHT: f32 = 40.0;
-const TIMEZONE_ROW_HEIGHT: f32 = 42.0;
-const TIMEZONE_SECTION_PADDING: f32 = 20.0;
+// These must match the actual rendered sizes from the render functions
+const CALENDAR_HEADER_HEIGHT: f32 = 44.0; // nav buttons 28px + py(8.0)*2 = 44
+const CALENDAR_WEEKDAY_ROW_HEIGHT: f32 = 16.0; // text 12px + line height
+const CALENDAR_WEEK_ROW_HEIGHT: f32 = 40.0; // cell 32px + py(4.0)*2
+const CALENDAR_WEEKS: f32 = 6.0; // Max weeks (Feb on Sat can need 6)
+const CALENDAR_PADDING: f32 = 24.0; // p(12.0) = 12*2
+
+const TIMEZONE_SCRUB_BAR_HEIGHT: f32 = 61.0; // mt(4) + py(8)*2 + slider(16) + gap(8) + labels(17)
+const TIMEZONE_ROW_HEIGHT: f32 = 41.0; // content ~33px + py(4.0)*2
+const TIMEZONE_SECTION_PADDING: f32 = 20.0; // pb(20.0)
 const TIMEZONE_COUNT: f32 = 7.0;
 
 /// Timezones to display: (display name, timezone abbreviation, UTC offset hours)
@@ -574,7 +576,15 @@ pub fn timezones_section_height() -> f32 {
 
 /// Calculate height for combined view.
 pub fn combined_content_height() -> f32 {
-    calendar_grid_height() + timezones_section_height()
+    let cal = calendar_grid_height();
+    let tz = timezones_section_height();
+    log::info!(
+        "Calendar content height: calendar={}, timezones={}, total={}",
+        cal,
+        tz,
+        cal + tz
+    );
+    cal + tz
 }
 
 // ============================================================================
@@ -676,6 +686,8 @@ impl Render for CalendarView {
             self.scrub.reset();
         }
 
+        // h_full() makes the container fill the window height.
+        // The window should be sized to match content_height() for exact fit.
         div()
             .id("calendar-view")
             .w_full()

@@ -26,8 +26,6 @@ mod window_title;
 pub use app_name::AppNameModule;
 pub use battery::BatteryModule;
 pub use calendar::CalendarView;
-// These alternative popup views are available for future use:
-// pub use calendar::{CalendarGridPopupView, TimezonesPopupView};
 pub use clock::ClockModule;
 pub use cpu::CpuModule;
 pub use date::DateModule;

@@ -18,19 +18,6 @@ use crate::gpui_app::theme::Theme;
 /// Maximum time offset in minutes (12 hours each direction)
 const MAX_TIME_OFFSET_MINUTES: i32 = 12 * 60;
 
-// Layout constants for height calculation
-// These must match the actual rendered sizes from the render functions
-const CALENDAR_HEADER_HEIGHT: f32 = 44.0; // nav buttons 28px + py(8.0)*2 = 44
-const CALENDAR_WEEKDAY_ROW_HEIGHT: f32 = 16.0; // text 12px + line height
-const CALENDAR_WEEK_ROW_HEIGHT: f32 = 40.0; // cell 32px + py(4.0)*2
-const CALENDAR_WEEKS: f32 = 6.0; // Max weeks (Feb on Sat can need 6)
-const CALENDAR_PADDING: f32 = 24.0; // p(12.0) = 12*2
-
-const TIMEZONE_SCRUB_BAR_HEIGHT: f32 = 61.0; // mt(4) + py(8)*2 + slider(16) + gap(8) + labels(17)
-const TIMEZONE_ROW_HEIGHT: f32 = 41.0; // content ~33px + py(4.0)*2
-const TIMEZONE_SECTION_PADDING: f32 = 20.0; // pb(20.0)
-const TIMEZONE_COUNT: f32 = 7.0;
-
 /// Timezones to display: (display name, timezone abbreviation, UTC offset hours)
 const TIMEZONES: &[(&str, &str, i32)] = &[
     ("Pacific", "PST", -8),
@@ -330,7 +317,7 @@ pub fn render_calendar_grid(
         }
     }
 
-    div().flex().flex_col().p(px(12.0)).children(rows)
+    div().flex().flex_col().px(px(12.0)).children(rows)
 }
 
 /// Renders the timezone list with current times.
@@ -558,36 +545,6 @@ pub fn render_time_slider<V: 'static>(
 }
 
 // ============================================================================
-// Height Calculation Functions
-// ============================================================================
-
-/// Calculate height for calendar grid only.
-pub fn calendar_grid_height() -> f32 {
-    CALENDAR_HEADER_HEIGHT
-        + CALENDAR_WEEKDAY_ROW_HEIGHT
-        + (CALENDAR_WEEKS * CALENDAR_WEEK_ROW_HEIGHT)
-        + CALENDAR_PADDING
-}
-
-/// Calculate height for timezones section only.
-pub fn timezones_section_height() -> f32 {
-    TIMEZONE_SCRUB_BAR_HEIGHT + (TIMEZONE_COUNT * TIMEZONE_ROW_HEIGHT) + TIMEZONE_SECTION_PADDING
-}
-
-/// Calculate height for combined view.
-pub fn combined_content_height() -> f32 {
-    let cal = calendar_grid_height();
-    let tz = timezones_section_height();
-    log::info!(
-        "Calendar content height: calendar={}, timezones={}, total={}",
-        cal,
-        tz,
-        cal + tz
-    );
-    cal + tz
-}
-
-// ============================================================================
 // Combined Calendar + Timezones View
 // ============================================================================
 
@@ -607,11 +564,6 @@ impl CalendarView {
             scrub: TimeScrubState::new(),
             last_click: None,
         }
-    }
-
-    /// Calculate the preferred content height for the calendar view.
-    pub fn content_height() -> f32 {
-        combined_content_height()
     }
 
     fn render_calendar(&self, cx: &mut Context<Self>) -> gpui::Div {
@@ -674,7 +626,6 @@ impl CalendarView {
             .flex()
             .flex_col()
             .px(px(12.0))
-            .pb(px(20.0))
             .child(slider)
             .children(timezone_rows)
     }
@@ -686,8 +637,6 @@ impl Render for CalendarView {
             self.scrub.reset();
         }
 
-        // h_full() makes the container fill the window height.
-        // The window should be sized to match content_height() for exact fit.
         div()
             .id("calendar-view")
             .w_full()
@@ -737,10 +686,6 @@ impl TimezonesPopupView {
             scrub: TimeScrubState::new(),
             last_click: None,
         }
-    }
-
-    pub fn content_height() -> f32 {
-        timezones_section_height()
     }
 }
 
@@ -834,10 +779,6 @@ impl CalendarGridPopupView {
             theme,
             nav: CalendarNavState::new(),
         }
-    }
-
-    pub fn content_height() -> f32 {
-        calendar_grid_height()
     }
 }
 

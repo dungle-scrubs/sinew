@@ -29,6 +29,35 @@ use crate::window::get_main_screen_info;
 /// This allows the macOS menu bar (level 24) to appear above RustyBar.
 const MENU_BAR_WINDOW_LEVEL: i64 = -20;
 
+/// Calculate calendar popup height based on current month's week count.
+fn calculate_calendar_height() -> f64 {
+    use chrono::{Datelike, Local, NaiveDate};
+
+    let today = Local::now().date_naive();
+    let year = today.year();
+    let month = today.month();
+
+    // Calculate weeks needed for current month
+    let first_day = NaiveDate::from_ymd_opt(year, month, 1).unwrap();
+    let days_in_month = if month == 12 {
+        NaiveDate::from_ymd_opt(year + 1, 1, 1)
+    } else {
+        NaiveDate::from_ymd_opt(year, month + 1, 1)
+    }
+    .unwrap()
+    .signed_duration_since(first_day)
+    .num_days() as u32;
+    let first_weekday = first_day.weekday().num_days_from_sunday();
+    let weeks = ((first_weekday + days_in_month + 6) / 7) as f64;
+
+    // Calendar section: header(44) + weekdays(20) + weeks*42 + bottom_margin(16)
+    let calendar = 44.0 + 20.0 + (weeks * 42.0) + 16.0;
+    // Timezone section: slider(70) + 7 rows(50 each)
+    let timezones = 70.0 + (7.0 * 50.0);
+    // Total with border
+    calendar + timezones + 2.0
+}
+
 /// Runs the GPUI-based RustyBar application.
 pub fn run() {
     Application::new().run(|cx: &mut App| {
@@ -134,12 +163,10 @@ pub fn run() {
         popup_manager::hide_panel_on_create();
 
         // Create the calendar popup window (hidden by default)
-        // Position it under the right bar area where the calendar button is
+        // Calculate height based on actual content structure
         let calendar_width = 280.0;
-        let calendar_max_height = (screen_height - bar_height) * 0.90;
-        let calendar_content_height = modules::CalendarView::content_height() as f64;
-        let calendar_height = calendar_content_height.min(calendar_max_height);
-        let calendar_x = screen_x + screen_width - calendar_width - 80.0; // Offset from right edge, under date module
+        let calendar_height = calculate_calendar_height();
+        let calendar_x = screen_x + screen_width - calendar_width - 80.0;
 
         create_calendar_window(
             cx,
@@ -281,6 +308,7 @@ fn create_calendar_window(
                 is_movable: false,
                 focus: false,
                 show: true,
+                window_background: gpui::WindowBackgroundAppearance::Transparent,
                 ..Default::default()
             },
             |_window, cx| cx.new(|_cx| popup::CalendarPopupView::new(theme)),

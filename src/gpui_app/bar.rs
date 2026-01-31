@@ -1,13 +1,16 @@
 //! GPUI bar view implementation.
 
 use gpui::{div, prelude::*, px, Context, MouseButton, ParentElement, Rgba, Styled, Window};
+use objc2::MainThreadMarker;
+use objc2_app_kit::NSEvent;
 use std::process::Command;
 use std::sync::Arc;
 use std::sync::RwLock;
 use std::time::{Duration, Instant};
 
 use crate::config::{load_config, Config, ConfigWatcher, SharedConfig};
-use crate::gpui_app::modules::{create_module, PositionedModule};
+use crate::gpui_app::modules::{create_module, PopupAnchor, PositionedModule};
+use crate::gpui_app::popup_manager::PopupAlign;
 use crate::gpui_app::theme::Theme;
 use crate::window::WindowPosition;
 
@@ -241,13 +244,30 @@ impl BarView {
         // Add click handler for popup or command
         if let Some(ref popup_cfg) = pm.popup {
             let popup_type = popup_cfg.popup_type.clone();
+            let anchor = popup_cfg.anchor;
             wrapper = wrapper.on_mouse_down(MouseButton::Left, move |_event, _window, _cx| {
                 log::info!("Module clicked, popup_type={:?}", popup_type);
+
+                // Get mouse position in screen coordinates
+                let (mouse_x, _mouse_y) = get_mouse_screen_position();
+
+                // Convert anchor to align
+                let align = match anchor {
+                    PopupAnchor::Left => PopupAlign::Left,
+                    PopupAnchor::Center => PopupAlign::Center,
+                    PopupAnchor::Right => PopupAlign::Right,
+                };
+
                 // Toggle popups based on type
                 if popup_type.as_deref() == Some("demo") {
                     crate::gpui_app::toggle_demo_panel();
                 } else if popup_type.as_deref() == Some("calendar") {
-                    crate::gpui_app::toggle_calendar_popup();
+                    // Use mouse position as trigger position (popup will center under it)
+                    crate::gpui_app::popup_manager::toggle_calendar_popup_at(
+                        mouse_x - 50.0, // Offset to approximate element center
+                        100.0,          // Approximate element width
+                        align,
+                    );
                 }
             });
         } else if let Some(ref cmd) = pm.click_command {
@@ -275,6 +295,16 @@ fn execute_command(command: &str) {
     std::thread::spawn(move || {
         let _ = Command::new("sh").args(["-c", &cmd]).spawn();
     });
+}
+
+/// Gets the current mouse position in screen coordinates.
+fn get_mouse_screen_position() -> (f64, f64) {
+    if let Some(_mtm) = MainThreadMarker::new() {
+        let location = NSEvent::mouseLocation();
+        (location.x, location.y)
+    } else {
+        (0.0, 0.0)
+    }
 }
 
 impl Render for BarView {

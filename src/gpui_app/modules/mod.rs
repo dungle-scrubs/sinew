@@ -9,6 +9,7 @@ pub mod calendar;
 mod clock;
 mod cpu;
 mod date;
+mod datetime;
 mod demo;
 mod disk;
 mod memory;
@@ -24,10 +25,11 @@ mod window_title;
 
 pub use app_name::AppNameModule;
 pub use battery::BatteryModule;
-pub use calendar::CalendarView;
+pub use calendar::{CalendarGridPopupView, CalendarView, TimezonesPopupView};
 pub use clock::ClockModule;
 pub use cpu::CpuModule;
 pub use date::DateModule;
+pub use datetime::DateTimeModule;
 pub use demo::DemoModule;
 pub use disk::DiskModule;
 pub use memory::MemoryModule;
@@ -196,6 +198,11 @@ pub fn create_module(config: &ModuleConfig, index: usize) -> Option<PositionedMo
         "date" => {
             let format = config.format.as_deref().unwrap_or("%a %b %d");
             Some(Box::new(DateModule::new(&id, format)))
+        }
+        "datetime" => {
+            let date_format = config.date_format.as_deref().unwrap_or("%a %b %d");
+            let time_format = config.time_format.as_deref().unwrap_or("%H:%M");
+            Some(Box::new(DateTimeModule::new(&id, date_format, time_format)))
         }
         "battery" => Some(Box::new(BatteryModule::new(&id, config.label.as_deref()))),
         "volume" => Some(Box::new(VolumeModule::new(&id))),

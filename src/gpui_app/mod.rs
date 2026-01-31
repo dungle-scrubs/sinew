@@ -12,7 +12,7 @@ pub mod popup_manager;
 pub mod primitives;
 pub mod theme;
 
-pub use popup_manager::{hide_demo_panel, toggle_calendar_popup, toggle_demo_panel};
+pub use popup_manager::toggle_demo_panel;
 
 use gpui::{
     point, px, size, App, AppContext, Application, Bounds, WindowBounds, WindowKind, WindowOptions,
@@ -294,7 +294,7 @@ fn configure_calendar_window(mtm: MainThreadMarker, x: f64, bar_y: f64, width: f
 
                 let _: () = objc2::msg_send![&ns_window, setLevel: MENU_BAR_WINDOW_LEVEL];
 
-                ns_window.setHasShadow(true); // Small shadow for popup
+                ns_window.setHasShadow(false); // No shadow - popup extends from bar
                 ns_window.setOpaque(true);
                 ns_window.setIgnoresMouseEvents(false);
 

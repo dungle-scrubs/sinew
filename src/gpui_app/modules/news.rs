@@ -12,6 +12,14 @@ use gpui::{div, prelude::*, px, AnyElement, SharedString, Styled};
 use super::GpuiModule;
 use crate::gpui_app::theme::Theme;
 
+/// Global news data for panel access
+static GLOBAL_NEWS_DATA: RwLock<Option<ReleasesData>> = RwLock::new(None);
+
+/// Get the global news data for the panel
+pub fn get_global_news_data() -> Option<ReleasesData> {
+    GLOBAL_NEWS_DATA.read().ok().and_then(|g| g.clone())
+}
+
 /// A single release entry.
 #[derive(Debug, Clone)]
 pub struct ReleaseEntry {
@@ -90,6 +98,12 @@ impl NewsModule {
                 icon: "",
                 parse_mode: ParseMode::GitHubRelease,
             },
+            ReleaseSource {
+                name: "OpenClaw".to_string(),
+                url: "https://api.github.com/repos/openclaw/openclaw/releases/latest".to_string(),
+                icon: "🦀",
+                parse_mode: ParseMode::GitHubRelease,
+            },
         ]
     }
 
@@ -112,11 +126,19 @@ impl NewsModule {
                 results.push((source, releases));
             }
 
+            let releases_data = ReleasesData {
+                sources: results,
+                total_items,
+            };
+
+            // Store locally
             if let Ok(mut guard) = data.write() {
-                *guard = Some(ReleasesData {
-                    sources: results,
-                    total_items,
-                });
+                *guard = Some(releases_data.clone());
+            }
+
+            // Store globally for panel access
+            if let Ok(mut guard) = GLOBAL_NEWS_DATA.write() {
+                *guard = Some(releases_data);
             }
         });
     }
@@ -264,21 +286,42 @@ impl NewsModule {
             return Vec::new();
         }
 
-        // Parse body for bullet items
+        // Parse body for bullet items - only keep "New Features" and "Bug Fixes" sections
         let mut items = Vec::new();
-        let mut current_section = "Changes".to_string();
+        let mut current_section: Option<String> = None;
+        let wanted_sections = [
+            "New Features",
+            "Bug Fixes",
+            "Features",
+            "Fixes",
+            "Changes",
+            "Added",
+        ];
 
         for line in body.lines() {
             if let Some(section) = line
                 .strip_prefix("## ")
                 .or_else(|| line.strip_prefix("### "))
             {
-                current_section = section.trim().to_string();
-            } else if let Some(text) = line.strip_prefix("- ") {
-                items.push(ReleaseEntry {
-                    section: current_section.clone(),
-                    text: text.to_string(),
-                });
+                let section = section.trim();
+                if wanted_sections
+                    .iter()
+                    .any(|s| section.eq_ignore_ascii_case(s))
+                {
+                    current_section = Some(section.to_string());
+                } else {
+                    current_section = None;
+                }
+            } else if let Some(ref section) = current_section {
+                if let Some(text) = line.strip_prefix("- ") {
+                    // Only keep items that don't look like commit references
+                    if !text.starts_with('#') && items.len() < 10 {
+                        items.push(ReleaseEntry {
+                            section: section.clone(),
+                            text: text.to_string(),
+                        });
+                    }
+                }
             }
         }
 
@@ -286,10 +329,13 @@ impl NewsModule {
             return Vec::new();
         }
 
-        vec![Release {
-            version: tag_name.trim_start_matches('v').to_string(),
-            items,
-        }]
+        // Clean up version string
+        let version = tag_name
+            .trim_start_matches('v')
+            .trim_start_matches("rust-v")
+            .to_string();
+
+        vec![Release { version, items }]
     }
 
     /// Returns the current release data.

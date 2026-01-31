@@ -4,6 +4,7 @@ use serde::Deserialize;
 const KNOWN_MODULE_TYPES: &[&str] = &[
     "clock",
     "date",
+    "datetime",
     "demo",
     "static",
     "battery",
@@ -91,6 +92,10 @@ pub struct ModuleConfig {
     pub icon: Option<String>,
     /// Time format (for "clock" module)
     pub format: Option<String>,
+    /// Date format (for "datetime" module)
+    pub date_format: Option<String>,
+    /// Time format (for "datetime" module)
+    pub time_format: Option<String>,
     /// Font size override
     pub font_size: Option<f64>,
     /// Text color override

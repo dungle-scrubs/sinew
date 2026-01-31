@@ -12,8 +12,12 @@ use std::cell::RefCell;
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-/// Global visibility state for the demo panel.
-static DEMO_PANEL_VISIBLE: AtomicBool = AtomicBool::new(false);
+/// Global visibility state for the panel.
+static PANEL_VISIBLE: AtomicBool = AtomicBool::new(false);
+
+/// Panel content type (0 = demo, 1 = news)
+/// Initialize to NEWS so panel doesn't render demo content on creation
+static PANEL_CONTENT_TYPE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(1);
 
 /// Global visibility state for the calendar popup.
 static CALENDAR_POPUP_VISIBLE: AtomicBool = AtomicBool::new(false);
@@ -32,39 +36,73 @@ thread_local! {
 /// Panel window height - used to identify the panel window.
 const PANEL_HEIGHT_THRESHOLD: f64 = 100.0;
 
+/// Panel content types
+pub const PANEL_CONTENT_DEMO: u8 = 0;
+pub const PANEL_CONTENT_NEWS: u8 = 1;
+
 /// Toggles the demo panel visibility.
 /// Returns the new visibility state.
 pub fn toggle_demo_panel() -> bool {
-    let was_visible = DEMO_PANEL_VISIBLE.fetch_xor(true, Ordering::SeqCst);
-    let now_visible = !was_visible;
-
-    log::info!(
-        "toggle_demo_panel: was_visible={}, now_visible={}",
-        was_visible,
-        now_visible
-    );
-
-    // Toggle the NSWindow visibility directly
-    toggle_panel_window(now_visible);
-
-    now_visible
+    toggle_panel_with_content(PANEL_CONTENT_DEMO)
 }
 
-/// Returns whether the demo panel is currently visible.
-pub fn is_demo_panel_visible() -> bool {
-    DEMO_PANEL_VISIBLE.load(Ordering::SeqCst)
+/// Toggles the news panel visibility.
+/// Returns the new visibility state.
+pub fn toggle_news_panel() -> bool {
+    toggle_panel_with_content(PANEL_CONTENT_NEWS)
+}
+
+/// Toggles the panel with specified content type.
+fn toggle_panel_with_content(content_type: u8) -> bool {
+    let was_visible = PANEL_VISIBLE.load(Ordering::SeqCst);
+    let current_content = PANEL_CONTENT_TYPE.load(Ordering::SeqCst);
+
+    // If panel is visible with same content, just hide it
+    if was_visible && current_content == content_type {
+        PANEL_VISIBLE.store(false, Ordering::SeqCst);
+        toggle_panel_window(false);
+        log::info!("toggle_panel: hiding (same content)");
+        return false;
+    }
+
+    // If panel is visible with different content, or was hidden, show with new content
+    // Always set content type FIRST, then do hide/show cycle to force GPUI re-render
+    PANEL_CONTENT_TYPE.store(content_type, Ordering::SeqCst);
+    PANEL_VISIBLE.store(true, Ordering::SeqCst);
+
+    log::info!(
+        "toggle_panel: showing content={} (was_visible={}, prev_content={})",
+        content_type,
+        was_visible,
+        current_content
+    );
+
+    // Show the panel (content type already set)
+    toggle_panel_window(true);
+    true
+}
+
+/// Returns whether the panel is currently visible.
+pub fn is_panel_visible() -> bool {
+    PANEL_VISIBLE.load(Ordering::SeqCst)
+}
+
+/// Returns the current panel content type.
+pub fn get_panel_content_type() -> u8 {
+    PANEL_CONTENT_TYPE.load(Ordering::SeqCst)
 }
 
 /// Shows the demo panel.
 pub fn show_demo_panel() {
-    if !DEMO_PANEL_VISIBLE.swap(true, Ordering::SeqCst) {
+    PANEL_CONTENT_TYPE.store(PANEL_CONTENT_DEMO, Ordering::SeqCst);
+    if !PANEL_VISIBLE.swap(true, Ordering::SeqCst) {
         toggle_panel_window(true);
     }
 }
 
-/// Hides the demo panel.
-pub fn hide_demo_panel() {
-    if DEMO_PANEL_VISIBLE.swap(false, Ordering::SeqCst) {
+/// Hides the panel.
+pub fn hide_panel() {
+    if PANEL_VISIBLE.swap(false, Ordering::SeqCst) {
         toggle_panel_window(false);
     }
 }
@@ -117,6 +155,15 @@ fn toggle_panel_window(visible: bool) {
                     let _: () = objc2::msg_send![&ns_window, setLevel: 3_i64];
                 }
                 ns_window.setAlphaValue(1.0);
+
+                // Force GPUI to redraw by slightly resizing the window
+                // GPUI doesn't respond to setNeedsDisplay since it uses its own Metal renderer
+                let mut new_frame = frame;
+                new_frame.size.height += 1.0;
+                ns_window.setFrame_display(new_frame, true);
+                new_frame.size.height -= 1.0;
+                ns_window.setFrame_display(new_frame, true);
+
                 ns_window.makeKeyAndOrderFront(None);
 
                 // Start monitoring for outside clicks
@@ -159,7 +206,7 @@ fn toggle_panel_window(visible: bool) {
 /// Hides the panel window immediately after creation.
 /// Call this from the window creation code.
 pub fn hide_panel_on_create() {
-    DEMO_PANEL_VISIBLE.store(false, Ordering::SeqCst);
+    PANEL_VISIBLE.store(false, Ordering::SeqCst);
     toggle_panel_window(false);
 }
 
@@ -190,7 +237,7 @@ pub fn calendar_should_reset() -> bool {
 /// * `align` - Alignment of popup relative to trigger
 pub fn toggle_calendar_popup_at(trigger_x: f64, trigger_width: f64, align: PopupAlign) -> bool {
     // First, hide any other popups
-    if DEMO_PANEL_VISIBLE.swap(false, Ordering::SeqCst) {
+    if PANEL_VISIBLE.swap(false, Ordering::SeqCst) {
         toggle_panel_window(false);
     }
 
@@ -216,7 +263,7 @@ pub fn toggle_calendar_popup_at(trigger_x: f64, trigger_width: f64, align: Popup
 /// Toggles the calendar popup visibility (uses last known position).
 pub fn toggle_calendar_popup() -> bool {
     // First, hide any other popups
-    if DEMO_PANEL_VISIBLE.swap(false, Ordering::SeqCst) {
+    if PANEL_VISIBLE.swap(false, Ordering::SeqCst) {
         toggle_panel_window(false);
     }
 
@@ -247,7 +294,7 @@ pub fn hide_calendar_popup() {
 
 /// Hides all popups.
 pub fn hide_all_popups() {
-    let panel_was_visible = DEMO_PANEL_VISIBLE.swap(false, Ordering::SeqCst);
+    let panel_was_visible = PANEL_VISIBLE.swap(false, Ordering::SeqCst);
     let calendar_was_visible = CALENDAR_POPUP_VISIBLE.swap(false, Ordering::SeqCst);
 
     if panel_was_visible || calendar_was_visible {
@@ -341,9 +388,7 @@ fn start_cursor_monitor(_mtm: MainThreadMarker) {
 
     let handler = RcBlock::new(|event: NonNull<NSEvent>| -> *mut NSEvent {
         // Force arrow cursor while any popup is visible
-        if CALENDAR_POPUP_VISIBLE.load(Ordering::SeqCst)
-            || DEMO_PANEL_VISIBLE.load(Ordering::SeqCst)
-        {
+        if CALENDAR_POPUP_VISIBLE.load(Ordering::SeqCst) || PANEL_VISIBLE.load(Ordering::SeqCst) {
             NSCursor::arrowCursor().set();
         }
         event.as_ptr() as *mut NSEvent // Pass through the event unchanged
@@ -583,7 +628,7 @@ fn toggle_calendar_window(visible: bool) {
                 ns_window.setAlphaValue(0.0);
 
                 // Remove monitors if no popups are visible
-                if !DEMO_PANEL_VISIBLE.load(Ordering::SeqCst) {
+                if !PANEL_VISIBLE.load(Ordering::SeqCst) {
                     remove_global_click_monitor();
                     stop_cursor_monitor();
                     stop_scroll_monitor();

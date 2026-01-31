@@ -2,6 +2,8 @@
 
 use gpui::{div, prelude::*, px, ElementId, ParentElement, Rgba, SharedString, Styled, Window};
 
+use crate::gpui_app::modules::{get_global_news_data, Release};
+use crate::gpui_app::popup_manager::{get_panel_content_type, PANEL_CONTENT_NEWS};
 use crate::gpui_app::theme::Theme;
 
 /// Panel view that shows component demos and other full-screen content.
@@ -363,27 +365,151 @@ impl PanelView {
     }
 }
 
+impl PanelView {
+    fn render_news_content(&self) -> gpui::Div {
+        let news_data = get_global_news_data();
+
+        let mut container = div()
+            .flex()
+            .flex_col()
+            .gap(px(12.0))
+            .p(px(16.0))
+            .w_full()
+            // Title
+            .child(
+                div()
+                    .text_color(self.theme.foreground)
+                    .text_size(px(16.0))
+                    .font_weight(gpui::FontWeight::BOLD)
+                    .child("Release Notes"),
+            );
+
+        if let Some(data) = news_data {
+            // 3-column layout
+            let columns = div().flex().flex_row().gap(px(12.0)).w_full().children(
+                data.sources.into_iter().map(|(source, releases)| {
+                    self.render_source_column(&source.name, &source.icon, releases)
+                }),
+            );
+            container = container.child(columns);
+        } else {
+            container = container.child(
+                div()
+                    .text_color(self.theme.foreground_muted)
+                    .text_size(px(12.0))
+                    .child("Loading..."),
+            );
+        }
+
+        container
+    }
+
+    fn render_source_column(&self, name: &str, icon: &str, releases: Vec<Release>) -> gpui::Div {
+        let name_str: SharedString = name.to_string().into();
+        let icon_str: SharedString = icon.to_string().into();
+
+        let mut column = div()
+            .flex()
+            .flex_col()
+            .flex_1()
+            .min_w(px(0.0))
+            .overflow_hidden()
+            .gap(px(8.0))
+            .p(px(12.0))
+            .rounded(px(6.0))
+            .bg(self.theme.surface)
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(6.0))
+                    .child(
+                        div()
+                            .text_color(self.theme.accent)
+                            .text_size(px(14.0))
+                            .child(icon_str),
+                    )
+                    .child(
+                        div()
+                            .text_color(self.theme.foreground)
+                            .text_size(px(13.0))
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .child(name_str),
+                    ),
+            );
+
+        if releases.is_empty() {
+            return column.child(
+                div()
+                    .text_color(self.theme.foreground_muted)
+                    .text_size(px(11.0))
+                    .child("No releases"),
+            );
+        }
+
+        for release in releases.into_iter().take(1) {
+            let version_str: SharedString = format!("v{}", release.version).into();
+            let mut release_div = div().flex().flex_col().gap(px(4.0)).child(
+                div()
+                    .text_color(self.theme.accent)
+                    .text_size(px(11.0))
+                    .font_weight(gpui::FontWeight::MEDIUM)
+                    .child(version_str),
+            );
+
+            for item in release.items.into_iter().take(6) {
+                let text: SharedString = if item.text.chars().count() > 60 {
+                    format!("{}...", item.text.chars().take(57).collect::<String>()).into()
+                } else {
+                    item.text.into()
+                };
+                release_div = release_div.child(
+                    div()
+                        .flex()
+                        .flex_row()
+                        .gap(px(4.0))
+                        .child(
+                            div()
+                                .text_color(self.theme.success)
+                                .text_size(px(11.0))
+                                .child("+"),
+                        )
+                        .child(
+                            div()
+                                .text_color(self.theme.foreground)
+                                .text_size(px(11.0))
+                                .child(text),
+                        ),
+                );
+            }
+            column = column.child(release_div);
+        }
+
+        column
+    }
+}
+
 impl Render for PanelView {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        // Window visibility is managed by popup_manager using NSWindow orderFront/orderOut
-        // This view always renders its full content
+        let content_type = get_panel_content_type();
+        log::debug!("Panel render: content_type={}", content_type);
 
-        // Log the background color being used for debugging
-        log::debug!(
-            "Panel rendering with background: r={}, g={}, b={}, a={}",
-            self.theme.background.r,
-            self.theme.background.g,
-            self.theme.background.b,
-            self.theme.background.a
-        );
+        let content = if content_type == PANEL_CONTENT_NEWS {
+            log::info!("Panel rendering NEWS content");
+            self.render_news_content()
+        } else {
+            log::debug!("Panel rendering demo content");
+            self.render_demo_content()
+        };
 
         div()
             .id(ElementId::Name("panel-content".into()))
             .w_full()
             .h_full()
-            .cursor_default() // Ensure popup controls cursor, not app below
+            .cursor_default()
             .bg(self.theme.background)
-            .overflow_y_scroll() // Enable vertical scrolling
-            .child(self.render_demo_content())
+            .overflow_y_scroll()
+            .child(content)
     }
 }

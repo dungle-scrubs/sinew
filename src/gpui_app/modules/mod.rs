@@ -34,7 +34,7 @@ pub use datetime::DateTimeModule;
 pub use demo::DemoModule;
 pub use disk::DiskModule;
 pub use memory::MemoryModule;
-pub use news::NewsModule;
+pub use news::{get_global_news_data, NewsModule, Release};
 pub use now_playing::NowPlayingModule;
 pub use script::ScriptModule;
 pub use separator::SeparatorModule;

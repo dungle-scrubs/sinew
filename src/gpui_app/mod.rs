@@ -13,8 +13,6 @@ pub mod popup_manager;
 pub mod primitives;
 pub mod theme;
 
-pub use popup_manager::toggle_demo_panel;
-
 use gpui::{
     point, px, size, App, AppContext, Application, Bounds, WindowBounds, WindowKind, WindowOptions,
 };
@@ -91,12 +89,11 @@ pub fn run() {
 
         create_bar_window(cx, mtm, screen_x, macos_y, screen_width, bar_height);
 
-        // Create the demo panel window (hidden by default)
-        // Full-width panel extends directly from the bar with no gap
+        // Create the panel window (hidden by default)
         let theme = theme::Theme::from_config(&config.bar);
-        let panel_height = (screen_height - bar_height) * 0.75; // 75% of remaining screen
-        let panel_width = screen_width; // Full width
-        let panel_x = screen_x; // Start from left edge
+        let panel_height = 280.0; // Compact height for news
+        let panel_width = screen_width;
+        let panel_x = screen_x;
 
         create_panel_window(cx, mtm, panel_x, macos_y, panel_width, panel_height, theme);
 
@@ -201,6 +198,7 @@ fn configure_panel_window(mtm: MainThreadMarker, x: f64, bar_y: f64, width: f64,
                 // Same level as bar
                 let _: () = objc2::msg_send![&ns_window, setLevel: MENU_BAR_WINDOW_LEVEL];
 
+                // Let GPUI handle the background color - don't set NSWindow background
                 ns_window.setHasShadow(false);
                 ns_window.setOpaque(true);
                 ns_window.setIgnoresMouseEvents(false);

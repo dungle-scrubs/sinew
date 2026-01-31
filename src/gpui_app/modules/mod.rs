@@ -5,6 +5,7 @@
 
 mod app_name;
 mod battery;
+pub mod calendar;
 mod clock;
 mod cpu;
 mod date;
@@ -23,6 +24,7 @@ mod window_title;
 
 pub use app_name::AppNameModule;
 pub use battery::BatteryModule;
+pub use calendar::CalendarView;
 pub use clock::ClockModule;
 pub use cpu::CpuModule;
 pub use date::DateModule;

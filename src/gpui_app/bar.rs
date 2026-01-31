@@ -303,8 +303,10 @@ impl BarView {
             wrapper = wrapper.on_mouse_down(MouseButton::Left, move |_event, _window, _cx| {
                 log::info!("Module clicked, popup_type={:?}", popup_type);
                 // Toggle popups based on type
-                if popup_type.as_deref() == Some("demo") || popup_type.as_deref() == Some("news") {
-                    crate::gpui_app::toggle_demo_panel();
+                if popup_type.as_deref() == Some("demo") {
+                    crate::gpui_app::popup_manager::toggle_demo_panel();
+                } else if popup_type.as_deref() == Some("news") {
+                    crate::gpui_app::popup_manager::toggle_news_panel();
                 } else if popup_type.as_deref() == Some("calendar") {
                     // Get current mouse position for popup positioning
                     let mouse_pos = get_mouse_screen_position();
@@ -427,45 +429,57 @@ impl Render for BarView {
             .h_full()
             .bg(bg_color)
             .px(px(8.0))
+            // Left section: outer | spacer | inner (toward notch)
             .child(
-                // Left outer modules (far left)
                 div()
                     .flex()
                     .flex_row()
                     .items_center()
-                    .gap(px(4.0))
-                    .children(left_outer_elements),
+                    .flex_1()
+                    .child(
+                        div()
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .gap(px(4.0))
+                            .children(left_outer_elements),
+                    )
+                    .child(div().flex_grow())
+                    .child(
+                        div()
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .gap(px(4.0))
+                            .children(left_inner_elements),
+                    ),
             )
+            // Notch gap
+            .child(div().w(px(200.0)))
+            // Right section: outer (toward notch) | spacer | inner
             .child(
-                // Left inner modules (toward center)
                 div()
                     .flex()
                     .flex_row()
                     .items_center()
-                    .gap(px(4.0))
-                    .children(left_inner_elements),
-            )
-            .child(
-                // Flexible spacer
-                div().flex_grow(),
-            )
-            .child(
-                // Right outer modules (toward center)
-                div()
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .gap(px(4.0))
-                    .children(right_outer_elements),
-            )
-            .child(
-                // Right inner modules (far right)
-                div()
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .gap(px(4.0))
-                    .children(right_inner_elements),
+                    .flex_1()
+                    .child(
+                        div()
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .gap(px(4.0))
+                            .children(right_outer_elements),
+                    )
+                    .child(div().flex_grow())
+                    .child(
+                        div()
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .gap(px(4.0))
+                            .children(right_inner_elements),
+                    ),
             )
     }
 }

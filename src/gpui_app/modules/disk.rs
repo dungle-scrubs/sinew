@@ -71,6 +71,9 @@ impl GpuiModule for DiskModule {
                 LabelAlign::Right => container.items_end(),
             };
 
+            // Fixed width for percentage to prevent reflow (fits "100%")
+            let value_width = theme.font_size * 0.85 * 2.5; // ~2.5 chars width
+
             container
                 .child(
                     div()
@@ -81,6 +84,9 @@ impl GpuiModule for DiskModule {
                 )
                 .child(
                     div()
+                        .min_w(px(value_width))
+                        .flex()
+                        .justify_end()
                         .text_color(theme.foreground)
                         .text_size(px(theme.font_size * 0.85))
                         .line_height(px(theme.font_size * 0.9))

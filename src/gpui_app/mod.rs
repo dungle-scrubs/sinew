@@ -87,6 +87,9 @@ pub fn run() {
         // so initial state is correct
         camera::start_monitoring();
 
+        // Initialize popup manager (registers popup closers for mutual exclusion)
+        popup_manager::init();
+
         create_bar_window(cx, mtm, screen_x, macos_y, screen_width, bar_height);
 
         // Create the panel window (hidden by default)
@@ -154,6 +157,7 @@ fn create_panel_window(
                 is_movable: false,
                 focus: false,
                 show: true,
+                window_background: gpui::WindowBackgroundAppearance::Opaque,
                 ..Default::default()
             },
             |_window, cx| cx.new(|_cx| panel::PanelView::new(theme)),
@@ -349,6 +353,7 @@ fn create_bar_window(
                 is_movable: false,
                 focus: false,
                 show: true,
+                window_background: gpui::WindowBackgroundAppearance::Opaque,
                 ..Default::default()
             },
             |_window, cx| cx.new(|_cx| BarView::new()),

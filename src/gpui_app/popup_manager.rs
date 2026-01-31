@@ -52,6 +52,48 @@ pub fn toggle_news_panel() -> bool {
     toggle_panel_with_content(PANEL_CONTENT_NEWS)
 }
 
+/// Registry of popup close functions for mutual exclusion.
+/// Each popup registers a closer that hides it.
+static POPUP_CLOSERS: std::sync::Mutex<Vec<(&'static str, Box<dyn Fn() + Send>)>> =
+    std::sync::Mutex::new(Vec::new());
+
+/// Initialize popup manager - registers all popup closers.
+/// Call once during app startup.
+pub fn init() {
+    register_popup("panel", || {
+        if PANEL_VISIBLE.swap(false, Ordering::SeqCst) {
+            toggle_panel_window(false);
+        }
+    });
+    register_popup("calendar", || {
+        if CALENDAR_POPUP_VISIBLE.swap(false, Ordering::SeqCst) {
+            toggle_calendar_window(false);
+        }
+    });
+    log::info!("Popup manager initialized");
+}
+
+/// Registers a popup's close function.
+/// Call this once per popup type during initialization.
+pub fn register_popup(name: &'static str, closer: impl Fn() + Send + 'static) {
+    if let Ok(mut closers) = POPUP_CLOSERS.lock() {
+        closers.push((name, Box::new(closer)));
+        log::debug!("Registered popup closer: {}", name);
+    }
+}
+
+/// Closes all popups except the one specified.
+/// Call this before showing any popup to ensure mutual exclusion.
+fn close_other_popups(except: &str) {
+    if let Ok(closers) = POPUP_CLOSERS.lock() {
+        for (name, closer) in closers.iter() {
+            if *name != except {
+                closer();
+            }
+        }
+    }
+}
+
 /// Toggles the panel with specified content type.
 fn toggle_panel_with_content(content_type: u8) -> bool {
     let was_visible = PANEL_VISIBLE.load(Ordering::SeqCst);
@@ -64,6 +106,9 @@ fn toggle_panel_with_content(content_type: u8) -> bool {
         log::info!("toggle_panel: hiding (same content)");
         return false;
     }
+
+    // Close other popups before showing this one
+    close_other_popups("panel");
 
     // If panel is visible with different content, or was hidden, show with new content
     // Always set content type FIRST, then do hide/show cycle to force GPUI re-render
@@ -236,53 +281,61 @@ pub fn calendar_should_reset() -> bool {
 /// * `trigger_width` - Width of the trigger element
 /// * `align` - Alignment of popup relative to trigger
 pub fn toggle_calendar_popup_at(trigger_x: f64, trigger_width: f64, align: PopupAlign) -> bool {
-    // First, hide any other popups
-    if PANEL_VISIBLE.swap(false, Ordering::SeqCst) {
-        toggle_panel_window(false);
+    let was_visible = CALENDAR_POPUP_VISIBLE.load(Ordering::SeqCst);
+
+    if was_visible {
+        // Already visible, just hide it
+        CALENDAR_POPUP_VISIBLE.store(false, Ordering::SeqCst);
+        toggle_calendar_window(false);
+        log::info!("toggle_calendar_popup_at: hiding");
+        return false;
     }
 
-    let was_visible = CALENDAR_POPUP_VISIBLE.fetch_xor(true, Ordering::SeqCst);
-    let now_visible = !was_visible;
+    // Close other popups before showing this one
+    close_other_popups("calendar");
+
+    CALENDAR_POPUP_VISIBLE.store(true, Ordering::SeqCst);
 
     log::info!(
-        "toggle_calendar_popup_at: trigger_x={}, trigger_width={}, align={:?}, was_visible={}, now_visible={}",
-        trigger_x, trigger_width, align, was_visible, now_visible
+        "toggle_calendar_popup_at: showing at trigger_x={}, trigger_width={}, align={:?}",
+        trigger_x,
+        trigger_width,
+        align
     );
 
-    if now_visible {
-        // Signal that calendar should reset time to "now"
-        CALENDAR_NEEDS_RESET.store(true, Ordering::SeqCst);
-        // Reposition the calendar window before showing
-        reposition_calendar_window(trigger_x, trigger_width, align);
-    }
+    // Signal that calendar should reset time to "now"
+    CALENDAR_NEEDS_RESET.store(true, Ordering::SeqCst);
+    // Reposition the calendar window before showing
+    reposition_calendar_window(trigger_x, trigger_width, align);
 
-    toggle_calendar_window(now_visible);
-    now_visible
+    toggle_calendar_window(true);
+    true
 }
 
 /// Toggles the calendar popup visibility (uses last known position).
 pub fn toggle_calendar_popup() -> bool {
-    // First, hide any other popups
-    if PANEL_VISIBLE.swap(false, Ordering::SeqCst) {
-        toggle_panel_window(false);
+    let was_visible = CALENDAR_POPUP_VISIBLE.load(Ordering::SeqCst);
+
+    if was_visible {
+        // Already visible, just hide it
+        CALENDAR_POPUP_VISIBLE.store(false, Ordering::SeqCst);
+        toggle_calendar_window(false);
+        log::info!("toggle_calendar_popup: hiding");
+        return false;
     }
 
-    let was_visible = CALENDAR_POPUP_VISIBLE.fetch_xor(true, Ordering::SeqCst);
-    let now_visible = !was_visible;
+    // Close other popups before showing this one
+    close_other_popups("calendar");
 
-    log::info!(
-        "toggle_calendar_popup: was_visible={}, now_visible={}",
-        was_visible,
-        now_visible
-    );
+    CALENDAR_POPUP_VISIBLE.store(true, Ordering::SeqCst);
 
-    if now_visible {
-        // Signal that calendar should reset time to "now"
-        CALENDAR_NEEDS_RESET.store(true, Ordering::SeqCst);
-    }
+    log::info!("toggle_calendar_popup: showing");
 
-    toggle_calendar_window(now_visible);
-    now_visible
+    // Signal that calendar should reset time to "now"
+    CALENDAR_NEEDS_RESET.store(true, Ordering::SeqCst);
+
+    toggle_calendar_window(true);
+    true
 }
 
 /// Hides the calendar popup.

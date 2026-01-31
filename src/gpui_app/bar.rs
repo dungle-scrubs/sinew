@@ -9,8 +9,10 @@ use std::sync::RwLock;
 use std::time::{Duration, Instant};
 
 use crate::config::{load_config, Config, ConfigWatcher, SharedConfig};
+use crate::gpui_app::camera;
 use crate::gpui_app::modules::{create_module, PopupAnchor, PositionedModule};
 use crate::gpui_app::popup_manager::PopupAlign;
+use crate::gpui_app::primitives::skeleton::Skeleton;
 use crate::gpui_app::theme::Theme;
 use crate::window::WindowPosition;
 
@@ -34,6 +36,8 @@ pub struct BarView {
     inner_modules: Vec<PositionedModule>,
     last_update: Instant,
     update_interval: Duration,
+    /// Cached camera state to detect changes between renders
+    last_camera_state: bool,
 }
 
 impl BarView {
@@ -62,6 +66,7 @@ impl BarView {
             inner_modules,
             last_update: Instant::now(),
             update_interval: Duration::from_millis(500),
+            last_camera_state: false,
         }
     }
 
@@ -201,11 +206,16 @@ impl BarView {
 
     /// Renders a single module with its styling.
     fn render_module(&self, pm: &PositionedModule) -> gpui::Div {
+        // If module is loading, render skeleton as the container
+        if pm.module.is_loading() {
+            return self.render_skeleton_container(pm);
+        }
+
         // Get the module's rendered element
         let module_element = pm.module.render(&self.theme);
 
         // Create wrapper with styling - always add some base padding
-        let mut wrapper = div().flex().items_center().px(px(6.0));
+        let mut wrapper = div().flex().items_center().px(px(4.0));
 
         // Apply custom text color if configured
         if let Some(color) = pm.text_color {
@@ -221,9 +231,11 @@ impl BarView {
                 wrapper = wrapper.rounded(px(pm.style.corner_radius));
             }
 
-            // Apply additional padding if configured
+            // Apply additional padding if configured (consistent horizontal and vertical)
             if pm.style.padding > 0.0 {
-                wrapper = wrapper.px(px(pm.style.padding + 6.0)).py(px(2.0));
+                wrapper = wrapper
+                    .px(px(pm.style.padding))
+                    .py(px(pm.style.padding * 0.5));
             }
         }
 
@@ -287,6 +299,31 @@ impl BarView {
 
         wrapper.child(module_element)
     }
+
+    /// Renders a skeleton as the container for loading modules.
+    /// The skeleton IS the container - it takes on the module's styling and shimmers.
+    fn render_skeleton_container(&self, pm: &PositionedModule) -> gpui::Div {
+        let corner_radius = pm.style.corner_radius;
+        let padding = if pm.style.padding > 0.0 {
+            pm.style.padding + 6.0
+        } else {
+            6.0
+        };
+
+        // Use module's background color or theme surface
+        let bg_color = pm.style.background.unwrap_or(self.theme.surface_hover);
+
+        // Create skeleton that IS the container
+        Skeleton::new()
+            .w(72.0) // Approximate width for loading state
+            .h(24.0) // Standard module height
+            .color(bg_color)
+            .rounded(corner_radius)
+            .shimmer()
+            .render(&self.theme)
+            .px(px(padding))
+            .py(px(2.0))
+    }
 }
 
 /// Execute a shell command in the background.
@@ -308,7 +345,7 @@ fn get_mouse_screen_position() -> (f64, f64) {
 }
 
 impl Render for BarView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // Check for config changes and rebuild if needed
         if self.check_config_reload() {
             cx.notify();
@@ -316,11 +353,24 @@ impl Render for BarView {
 
         // Update modules periodically
         if self.last_update.elapsed() > self.update_interval {
-            if self.update_modules() {
-                cx.notify();
-            }
+            self.update_modules();
             self.last_update = Instant::now();
         }
+
+        // Always check camera state (it has its own rate limiting)
+        camera::update_camera_state();
+        let current_camera_state = camera::is_camera_active();
+        self.last_camera_state = current_camera_state;
+
+        // Request next frame to keep this window updating
+        window.request_animation_frame();
+
+        // Determine background color (red tint when camera is active)
+        let bg_color = if current_camera_state {
+            camera::colors::RECORDING_BACKGROUND
+        } else {
+            self.theme.background
+        };
 
         // Build outer zone modules
         let outer_elements: Vec<gpui::Div> = self
@@ -346,7 +396,7 @@ impl Render for BarView {
                     .items_center()
                     .w_full()
                     .h_full()
-                    .bg(self.theme.background)
+                    .bg(bg_color)
                     .px(px(12.0))
                     .py(px(2.0))
                     .child(
@@ -380,7 +430,7 @@ impl Render for BarView {
                     .items_center()
                     .w_full()
                     .h_full()
-                    .bg(self.theme.background)
+                    .bg(bg_color)
                     .px(px(12.0))
                     .py(px(2.0))
                     .child(
@@ -414,7 +464,7 @@ impl Render for BarView {
                     .items_center()
                     .w_full()
                     .h_full()
-                    .bg(self.theme.background)
+                    .bg(bg_color)
                     .px(px(12.0))
                     .py(px(2.0))
                     .child(

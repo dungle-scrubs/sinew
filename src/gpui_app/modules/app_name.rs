@@ -27,14 +27,20 @@ impl AppNameModule {
     }
 
     fn fetch_status(&mut self) {
+        // Get the display name from the application bundle (e.g., "WezTerm" instead of "wezterm-gui")
         let output = Command::new("osascript")
-            .args(["-e", "tell application \"System Events\" to get name of first application process whose frontmost is true"])
+            .args([
+                "-e",
+                "tell application \"Finder\" to get name of (path to frontmost application)",
+            ])
             .output()
             .ok()
             .and_then(|o| String::from_utf8(o.stdout).ok());
 
         if let Some(name) = output {
-            self.name = truncate_text(name.trim(), self.max_length);
+            // Remove .app suffix if present
+            let name = name.trim().strip_suffix(".app").unwrap_or(name.trim());
+            self.name = truncate_text(name, self.max_length);
         }
     }
 }

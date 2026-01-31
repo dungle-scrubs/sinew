@@ -5,6 +5,7 @@
 //! scrolling and better performance.
 
 mod bar;
+pub mod camera;
 pub mod modules;
 mod panel;
 pub mod popup;

@@ -50,14 +50,14 @@ impl Icon {
 
 /// Common Nerd Font icons for bar modules.
 pub mod icons {
-    /// Battery icons by level.
+    /// Battery icons by level (Material Design Icons).
     pub mod battery {
-        pub const FULL: &str = "";
-        pub const THREE_QUARTERS: &str = "";
-        pub const HALF: &str = "";
-        pub const QUARTER: &str = "";
-        pub const EMPTY: &str = "";
-        pub const CHARGING: &str = "";
+        pub const FULL: &str = "󰁹"; // U+F0079 nf-md-battery
+        pub const THREE_QUARTERS: &str = "󰂁"; // U+F0081 nf-md-battery_80
+        pub const HALF: &str = "󰁾"; // U+F007E nf-md-battery_50
+        pub const QUARTER: &str = "󰁻"; // U+F007B nf-md-battery_20
+        pub const EMPTY: &str = "󰂎"; // U+F008E nf-md-battery_outline
+        pub const CHARGING: &str = "󰂄"; // U+F0084 nf-md-battery_charging
 
         /// Returns the appropriate battery icon for a charge level.
         pub fn for_level(level: u8, charging: bool) -> &'static str {
@@ -107,36 +107,37 @@ pub mod icons {
         pub const STRONG: &str = "󰤥";
     }
 
-    /// Weather icons.
+    /// Weather icons (Material Design Icons).
     pub mod weather {
-        pub const SUNNY: &str = "";
-        pub const CLOUDY: &str = "";
-        pub const PARTLY_CLOUDY: &str = "";
-        pub const RAINY: &str = "";
-        pub const SNOWY: &str = "";
-        pub const STORMY: &str = "";
-        pub const FOGGY: &str = "";
-        pub const WINDY: &str = "";
+        pub const SUNNY: &str = "󰖙"; // U+F0599 nf-md-weather_sunny
+        pub const CLOUDY: &str = "󰖐"; // U+F0590 nf-md-weather_cloudy
+        pub const PARTLY_CLOUDY: &str = "󰖕"; // U+F0595 nf-md-weather_partly_cloudy
+        pub const RAINY: &str = "󰖖"; // U+F0596 nf-md-weather_rainy
+        pub const SNOWY: &str = "󰖘"; // U+F0598 nf-md-weather_snowy
+        pub const STORMY: &str = "󰙾"; // U+F067E nf-md-weather_lightning
+        pub const FOGGY: &str = "󰖑"; // U+F0591 nf-md-weather_fog
+        pub const WINDY: &str = "󰖝"; // U+F059D nf-md-weather_windy
     }
 
-    /// Music/media icons.
+    /// Music/media icons (Font Awesome).
     pub mod music {
-        pub const PLAY: &str = "";
-        pub const PAUSE: &str = "";
-        pub const STOP: &str = "";
+        pub const PLAY: &str = "\u{f04b}";
+        pub const PAUSE: &str = "\u{f04c}";
+        pub const STOP: &str = "\u{f04d}";
         pub const NEXT: &str = "󰒭";
         pub const PREV: &str = "󰒮";
-        pub const NOTE: &str = "";
+        pub const NOTE: &str = "\u{f001}";
     }
 
-    /// System icons.
+    /// System icons (Material Design Icons).
     pub mod system {
-        pub const CPU: &str = "";
-        pub const MEMORY: &str = "";
-        pub const DISK: &str = "";
+        pub const CPU: &str = "󰍛"; // U+F035B nf-md-cpu_64_bit
+        pub const MEMORY: &str = "󰍛"; // U+F035B (same, or use 󰘚 U+F061A)
+        pub const DISK: &str = "󰋊"; // U+F02CA nf-md-harddisk
         pub const NETWORK: &str = "󰛳";
-        pub const DOWNLOAD: &str = "";
-        pub const UPLOAD: &str = "";
+        pub const DOWNLOAD: &str = "󰇚"; // U+F01DA nf-md-download
+        pub const UPLOAD: &str = "󰕒"; // U+F0552 nf-md-upload
+        pub const CALENDAR: &str = "󰃭"; // U+F00ED nf-md-calendar
     }
 }
 

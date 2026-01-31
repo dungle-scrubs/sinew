@@ -19,6 +19,7 @@ const KNOWN_MODULE_TYPES: &[&str] = &[
     "script",
     "weather",
     "separator",
+    "skeleton",
 ];
 
 /// Known separator types
@@ -179,6 +180,10 @@ pub struct ModuleConfig {
     pub label_font_size: Option<f64>,
     /// Label text alignment: "left", "center", "right" (default "center")
     pub label_align: Option<String>,
+    /// Width for skeleton module
+    pub skeleton_width: Option<f64>,
+    /// Height for skeleton module
+    pub skeleton_height: Option<f64>,
 }
 
 fn default_show_while_loading() -> bool {

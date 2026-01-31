@@ -14,6 +14,7 @@ mod memory;
 mod now_playing;
 mod script;
 mod separator;
+mod skeleton_demo;
 mod static_text;
 mod volume;
 mod weather;
@@ -31,6 +32,7 @@ pub use memory::MemoryModule;
 pub use now_playing::NowPlayingModule;
 pub use script::ScriptModule;
 pub use separator::SeparatorModule;
+pub use skeleton_demo::SkeletonDemoModule;
 pub use static_text::StaticTextModule;
 pub use volume::VolumeModule;
 pub use weather::WeatherModule;
@@ -256,6 +258,7 @@ pub fn create_module(config: &ModuleConfig, index: usize) -> Option<PositionedMo
             Some(Box::new(SeparatorModule::new(&id, sep_type, width)))
         }
         "demo" => Some(Box::new(DemoModule::new(&id))),
+        "skeleton" => Some(Box::new(SkeletonDemoModule::new(&id))),
         unknown => {
             log::warn!("Unknown module type: {}", unknown);
             None

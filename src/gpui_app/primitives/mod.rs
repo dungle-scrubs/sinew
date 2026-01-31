@@ -7,7 +7,7 @@ mod container;
 mod flex;
 pub mod icon;
 mod interactive;
-mod skeleton;
+pub mod skeleton;
 mod spacer;
 mod text;
 

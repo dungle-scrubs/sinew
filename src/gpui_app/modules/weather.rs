@@ -7,7 +7,18 @@ use gpui::{div, prelude::*, px, AnyElement, SharedString, Styled};
 
 use super::GpuiModule;
 use crate::gpui_app::primitives::icons::weather as weather_icons;
+use crate::gpui_app::primitives::skeleton::shimmer_skeleton;
 use crate::gpui_app::theme::{LoadingState, Theme};
+
+/// Loading display mode for async modules.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum LoadingMode {
+    /// Show a skeleton placeholder while loading.
+    #[default]
+    Skeleton,
+    /// Hide the module entirely until loaded.
+    Hidden,
+}
 
 /// Weather data from API.
 #[derive(Debug, Clone)]
@@ -24,6 +35,7 @@ pub struct WeatherModule {
     update_interval: Duration,
     last_update: Instant,
     state: LoadingState<WeatherData>,
+    loading_mode: LoadingMode,
 }
 
 impl WeatherModule {
@@ -35,9 +47,16 @@ impl WeatherModule {
             update_interval: Duration::from_secs(update_interval_secs),
             last_update: Instant::now() - Duration::from_secs(update_interval_secs + 1),
             state: LoadingState::Loading,
+            loading_mode: LoadingMode::Skeleton,
         };
         module.fetch_weather();
         module
+    }
+
+    /// Sets the loading display mode.
+    pub fn with_loading_mode(mut self, mode: LoadingMode) -> Self {
+        self.loading_mode = mode;
+        self
     }
 
     fn fetch_weather(&mut self) {
@@ -102,15 +121,21 @@ impl GpuiModule for WeatherModule {
     fn render(&self, theme: &Theme) -> AnyElement {
         match &self.state {
             LoadingState::Loading => {
-                // Show loading indicator
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(4.0))
-                    .text_color(theme.foreground_muted)
-                    .text_size(px(theme.font_size))
-                    .child(SharedString::from("..."))
-                    .into_any_element()
+                match self.loading_mode {
+                    LoadingMode::Skeleton => {
+                        // Show shimmer skeleton while loading
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(4.0))
+                            .child(shimmer_skeleton(50.0, 14.0).rounded(4.0).render(theme))
+                            .into_any_element()
+                    }
+                    LoadingMode::Hidden => {
+                        // Return empty element - module is hidden until loaded
+                        div().into_any_element()
+                    }
+                }
             }
             LoadingState::Loaded(data) => {
                 let text = format!("{} {}", data.icon, data.temp);

@@ -1,10 +1,12 @@
-//! Skeleton primitive for loading placeholders.
+//! Skeleton primitive for loading placeholders with optional shimmer animation.
 
-use gpui::{div, px, Div, Rgba, Styled};
+use std::time::Duration;
+
+use gpui::{div, px, Animation, AnimationExt, Div, ParentElement, Rgba, Styled};
 
 use crate::gpui_app::theme::Theme;
 
-/// Skeleton loading placeholder.
+/// Skeleton loading placeholder with optional shimmer animation.
 pub struct Skeleton {
     width: Option<f32>,
     height: Option<f32>,
@@ -12,6 +14,7 @@ pub struct Skeleton {
     corner_radius: f32,
     fill_width: bool,
     fill_height: bool,
+    shimmer: bool,
 }
 
 impl Skeleton {
@@ -24,6 +27,7 @@ impl Skeleton {
             corner_radius: 4.0,
             fill_width: false,
             fill_height: false,
+            shimmer: false,
         }
     }
 
@@ -79,11 +83,17 @@ impl Skeleton {
         self
     }
 
+    /// Enables shimmer animation.
+    pub fn shimmer(mut self) -> Self {
+        self.shimmer = true;
+        self
+    }
+
     /// Renders the skeleton with the given theme.
     pub fn render(self, theme: &Theme) -> Div {
-        let color = self.color.unwrap_or(theme.surface_hover);
+        let base_color = self.color.unwrap_or(theme.surface_hover);
 
-        let mut el = div().bg(color).rounded(px(self.corner_radius));
+        let mut el = div().bg(base_color).rounded(px(self.corner_radius));
 
         // Apply size
         if let Some(w) = self.width {
@@ -98,8 +108,47 @@ impl Skeleton {
             el = el.h_full();
         }
 
+        // Apply shimmer animation using opacity pulse
+        if self.shimmer {
+            let shimmer_highlight = Rgba {
+                r: base_color.r + 0.1,
+                g: base_color.g + 0.1,
+                b: base_color.b + 0.1,
+                a: base_color.a,
+            };
+
+            // Create a child element for the shimmer overlay
+            let shimmer_overlay = div()
+                .absolute()
+                .inset_0()
+                .bg(shimmer_highlight)
+                .rounded(px(self.corner_radius))
+                .with_animation(
+                    "shimmer",
+                    Animation::new(Duration::from_millis(1500))
+                        .repeat()
+                        .with_easing(ease_in_out_sine),
+                    |el, delta| {
+                        // Pulse opacity from 0 to 0.6 and back
+                        let opacity = if delta < 0.5 {
+                            delta * 2.0 * 0.6
+                        } else {
+                            (1.0 - delta) * 2.0 * 0.6
+                        };
+                        el.opacity(opacity)
+                    },
+                );
+
+            el = el.relative().child(shimmer_overlay);
+        }
+
         el
     }
+}
+
+/// Sine ease-in-out for smooth shimmer animation.
+fn ease_in_out_sine(t: f32) -> f32 {
+    -(f32::cos(std::f32::consts::PI * t) - 1.0) / 2.0
 }
 
 impl Default for Skeleton {
@@ -121,4 +170,9 @@ pub fn text_skeleton(width: f32) -> Skeleton {
 /// Creates an icon-like skeleton placeholder.
 pub fn icon_skeleton() -> Skeleton {
     Skeleton::new().width(16.0).height(16.0).rounded(2.0)
+}
+
+/// Creates a shimmer skeleton for loading states.
+pub fn shimmer_skeleton(width: f32, height: f32) -> Skeleton {
+    Skeleton::new().width(width).height(height).shimmer()
 }

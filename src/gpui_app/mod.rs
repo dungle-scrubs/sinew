@@ -295,7 +295,8 @@ fn configure_calendar_window(mtm: MainThreadMarker, x: f64, bar_y: f64, width: f
                 let _: () = objc2::msg_send![&ns_window, setLevel: MENU_BAR_WINDOW_LEVEL];
 
                 ns_window.setHasShadow(false); // No shadow - popup extends from bar
-                ns_window.setOpaque(true);
+                ns_window.setOpaque(false); // Transparent for rounded corners
+                ns_window.setBackgroundColor(None); // Clear background
                 ns_window.setIgnoresMouseEvents(false);
 
                 log::info!(

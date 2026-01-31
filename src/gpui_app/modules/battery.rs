@@ -69,21 +69,24 @@ impl GpuiModule for BatteryModule {
         let text = format!("{} {}%", icon, self.level);
 
         if let Some(ref label) = self.label {
-            // Two-line layout with label
+            // Two-line layout with label - tight spacing
             div()
                 .flex()
                 .flex_col()
                 .items_center()
+                .gap(px(0.0)) // Tight spacing between label and value
                 .child(
                     div()
                         .text_color(theme.foreground_muted)
                         .text_size(px(theme.font_size * 0.7))
+                        .line_height(px(theme.font_size * 0.8))
                         .child(SharedString::from(label.clone())),
                 )
                 .child(
                     div()
                         .text_color(theme.foreground)
                         .text_size(px(theme.font_size))
+                        .line_height(px(theme.font_size * 1.1))
                         .child(SharedString::from(text)),
                 )
                 .into_any_element()

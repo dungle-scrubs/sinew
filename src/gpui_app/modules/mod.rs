@@ -25,7 +25,7 @@ mod window_title;
 
 pub use app_name::AppNameModule;
 pub use battery::BatteryModule;
-pub use calendar::CalendarView;
+pub use calendar::{CalendarView, TIMEZONES};
 pub use clock::ClockModule;
 pub use cpu::CpuModule;
 pub use date::DateModule;

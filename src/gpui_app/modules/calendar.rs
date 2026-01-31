@@ -19,7 +19,7 @@ use crate::gpui_app::theme::Theme;
 const MAX_TIME_OFFSET_MINUTES: i32 = 12 * 60;
 
 /// Timezones to display: (display name, timezone abbreviation, UTC offset hours)
-const TIMEZONES: &[(&str, &str, i32)] = &[
+pub const TIMEZONES: &[(&str, &str, i32)] = &[
     ("Pacific", "PST", -8),
     ("Mountain", "MST", -7),
     ("Central", "CST", -6),

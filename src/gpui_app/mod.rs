@@ -52,8 +52,9 @@ fn calculate_calendar_height() -> f64 {
 
     // Calendar section: header(44) + weekdays(20) + weeks*42 + bottom_margin(16)
     let calendar = 44.0 + 20.0 + (weeks * 42.0) + 16.0;
-    // Timezone section: slider(70) + 7 rows(50 each)
-    let timezones = 70.0 + (7.0 * 50.0);
+    // Timezone section: slider(70) + rows(50 each)
+    let timezone_count = modules::TIMEZONES.len() as f64;
+    let timezones = 70.0 + (timezone_count * 50.0);
     // Total with border
     calendar + timezones + 2.0
 }

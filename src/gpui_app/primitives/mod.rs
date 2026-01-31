@@ -8,6 +8,7 @@ mod flex;
 pub mod icon;
 mod interactive;
 pub mod skeleton;
+pub mod slider;
 mod spacer;
 mod text;
 
@@ -21,6 +22,7 @@ pub use icon::icons;
 pub use interactive::Interactive;
 #[allow(unused)]
 pub use skeleton::Skeleton;
+pub use slider::{render_slider, SliderStyle};
 #[allow(unused)]
 pub use spacer::Spacer;
 #[allow(unused)]

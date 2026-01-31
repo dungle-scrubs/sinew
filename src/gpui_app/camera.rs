@@ -3,10 +3,10 @@
 //! Detects when the camera is in use and provides a global state
 //! that changes the bar appearance (red tint when recording).
 //!
-//! Uses macOS CoreMediaIO to detect actual camera usage by any app.
+//! Uses macOS CoreMediaIO property listeners to detect camera state changes
+//! without polling - macOS notifies us when the camera starts/stops.
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
 
 // CoreMediaIO FFI bindings
 mod ffi {
@@ -26,7 +26,16 @@ mod ffi {
     pub const K_CMIO_DEVICE_PROPERTY_DEVICE_IS_RUNNING_SOMEWHERE: CMIOObjectPropertySelector =
         0x676F6E65; // 'gone'
 
+    /// Callback type for property listeners
+    pub type CMIOObjectPropertyListenerProc = extern "C" fn(
+        object_id: CMIOObjectID,
+        number_addresses: u32,
+        addresses: *const CMIOObjectPropertyAddress,
+        client_data: *mut c_void,
+    ) -> OSStatus;
+
     #[repr(C)]
+    #[derive(Clone, Copy)]
     pub struct CMIOObjectPropertyAddress {
         pub selector: CMIOObjectPropertySelector,
         pub scope: CMIOObjectPropertyScope,
@@ -57,82 +66,208 @@ mod ffi {
             object_id: CMIOObjectID,
             address: *const CMIOObjectPropertyAddress,
         ) -> bool;
+
+        pub fn CMIOObjectAddPropertyListener(
+            object_id: CMIOObjectID,
+            address: *const CMIOObjectPropertyAddress,
+            listener: CMIOObjectPropertyListenerProc,
+            client_data: *mut c_void,
+        ) -> OSStatus;
     }
 }
 
 /// Global camera active state
 static CAMERA_ACTIVE: AtomicBool = AtomicBool::new(false);
 
-/// Manual override for testing
-static FORCE_CAMERA_ACTIVE: AtomicBool = AtomicBool::new(false);
+/// Whether we've registered the property listeners
+static LISTENERS_REGISTERED: AtomicBool = AtomicBool::new(false);
 
-/// Last check timestamp to avoid excessive polling
-static mut LAST_CHECK: Option<Instant> = None;
-
-/// Minimum interval between camera checks
-const CHECK_INTERVAL: Duration = Duration::from_secs(1);
+/// Flag to signal UI needs refresh (camera state changed)
+pub static CAMERA_STATE_CHANGED: AtomicBool = AtomicBool::new(false);
 
 /// Returns true if camera is currently in use.
 pub fn is_camera_active() -> bool {
-    let forced = FORCE_CAMERA_ACTIVE.load(Ordering::Relaxed);
-    let detected = CAMERA_ACTIVE.load(Ordering::Relaxed);
-    forced || detected
+    CAMERA_ACTIVE.load(Ordering::Relaxed)
 }
 
-/// Force camera active state on/off for testing.
-pub fn set_force_camera_active(enabled: bool) {
-    FORCE_CAMERA_ACTIVE.store(enabled, Ordering::Relaxed);
-    if enabled {
-        log::info!("Camera detection overridden - force enabled");
-    } else {
-        log::info!("Camera detection restored - force disabled");
-    }
+/// Check if camera state changed since last check (and clear the flag).
+pub fn take_state_changed() -> bool {
+    CAMERA_STATE_CHANGED.swap(false, Ordering::Relaxed)
 }
 
-/// Toggle force camera active state.
-pub fn toggle_force_camera_active() {
-    let current = FORCE_CAMERA_ACTIVE.load(Ordering::Relaxed);
-    set_force_camera_active(!current);
-}
-
-/// Updates the camera state by checking if camera is in use.
-/// Call this periodically (e.g., every second).
-pub fn update_camera_state() -> bool {
-    // If force mode is on, don't bother checking
-    if FORCE_CAMERA_ACTIVE.load(Ordering::Relaxed) {
-        return true;
+/// Initialize camera monitoring with property listeners.
+/// Call this once at app startup.
+pub fn start_monitoring() {
+    if LISTENERS_REGISTERED.swap(true, Ordering::Relaxed) {
+        return; // Already registered
     }
 
-    // Rate limit checks
-    let now = Instant::now();
-    let should_check = unsafe {
-        match LAST_CHECK {
-            Some(last) => now.duration_since(last) >= CHECK_INTERVAL,
-            None => true,
+    // Do initial check
+    let is_active = check_camera_usage_native();
+    CAMERA_ACTIVE.store(is_active, Ordering::Relaxed);
+    log::info!(
+        "Camera monitoring started, initial state: {}",
+        if is_active { "active" } else { "inactive" }
+    );
+
+    // If camera is initially active, signal a state change so the UI refreshes
+    if is_active {
+        CAMERA_STATE_CHANGED.store(true, Ordering::Relaxed);
+        trigger_ui_refresh();
+    }
+
+    // Register listeners for all camera devices
+    register_property_listeners();
+}
+
+/// Callback when camera property changes
+extern "C" fn camera_property_changed(
+    _object_id: ffi::CMIOObjectID,
+    _number_addresses: u32,
+    _addresses: *const ffi::CMIOObjectPropertyAddress,
+    _client_data: *mut std::ffi::c_void,
+) -> ffi::OSStatus {
+    // Re-check camera state
+    let is_active = check_camera_usage_native();
+    let was_active = CAMERA_ACTIVE.swap(is_active, Ordering::Relaxed);
+
+    if is_active != was_active {
+        log::info!(
+            "Camera state changed: {}",
+            if is_active { "active" } else { "inactive" }
+        );
+        CAMERA_STATE_CHANGED.store(true, Ordering::Relaxed);
+
+        // Trigger UI refresh via dispatch to main queue
+        trigger_ui_refresh();
+    }
+
+    ffi::K_CMIO_HARDWARE_NO_ERROR
+}
+
+/// Trigger a UI refresh by posting a synthetic event to wake up the run loop
+fn trigger_ui_refresh() {
+    #[link(name = "System", kind = "dylib")]
+    extern "C" {
+        fn dispatch_async_f(
+            queue: *const std::ffi::c_void,
+            context: *mut std::ffi::c_void,
+            work: extern "C" fn(*mut std::ffi::c_void),
+        );
+        static _dispatch_main_q: std::ffi::c_void;
+    }
+
+    extern "C" fn post_event(_: *mut std::ffi::c_void) {
+        use objc2_app_kit::{NSApplication, NSEvent, NSEventType};
+        use objc2_foundation::{MainThreadMarker, NSPoint};
+
+        // We're now on the main thread
+        if let Some(mtm) = MainThreadMarker::new() {
+            // Post a synthetic application-defined event to wake up GPUI's event loop
+            let event = NSEvent::otherEventWithType_location_modifierFlags_timestamp_windowNumber_context_subtype_data1_data2(
+                NSEventType::ApplicationDefined,
+                NSPoint { x: 0.0, y: 0.0 },
+                objc2_app_kit::NSEventModifierFlags::empty(),
+                0.0,
+                0,
+                None,
+                0,
+                0,
+                0,
+            );
+
+            if let Some(event) = event {
+                let app = NSApplication::sharedApplication(mtm);
+                app.postEvent_atStart(&event, true);
+                log::debug!("Posted synthetic event to wake up GPUI");
+            }
         }
-    };
-
-    if !should_check {
-        return CAMERA_ACTIVE.load(Ordering::Relaxed);
     }
 
     unsafe {
-        LAST_CHECK = Some(now);
+        dispatch_async_f(
+            &_dispatch_main_q as *const _ as *const std::ffi::c_void,
+            std::ptr::null_mut(),
+            post_event,
+        );
     }
+}
 
-    let is_camera_on = check_camera_usage_native();
-    let was_active = CAMERA_ACTIVE.swap(is_camera_on, Ordering::Relaxed);
+/// Register property listeners for all camera devices
+fn register_property_listeners() {
+    use ffi::*;
+    use std::ptr::null;
 
-    // Log state changes
-    if is_camera_on != was_active {
-        if is_camera_on {
-            log::info!("Camera is active");
-        } else {
-            log::info!("Camera is inactive");
+    unsafe {
+        // Get the list of camera devices
+        let devices_prop = CMIOObjectPropertyAddress {
+            selector: K_CMIO_HARDWARE_PROPERTY_DEVICES,
+            scope: K_CMIO_OBJECT_PROPERTY_SCOPE_GLOBAL,
+            element: K_CMIO_OBJECT_PROPERTY_ELEMENT_MAIN,
+        };
+
+        let mut data_size: u32 = 0;
+        let status = CMIOObjectGetPropertyDataSize(
+            K_CMIO_OBJECT_SYSTEM_OBJECT,
+            &devices_prop,
+            0,
+            null(),
+            &mut data_size,
+        );
+
+        if status != K_CMIO_HARDWARE_NO_ERROR || data_size == 0 {
+            log::warn!("Failed to get camera device list for listeners");
+            return;
         }
-    }
 
-    is_camera_on
+        let device_count = data_size as usize / std::mem::size_of::<CMIOObjectID>();
+        let mut devices: Vec<CMIOObjectID> = vec![0; device_count];
+
+        let mut data_used: u32 = 0;
+        let status = CMIOObjectGetPropertyData(
+            K_CMIO_OBJECT_SYSTEM_OBJECT,
+            &devices_prop,
+            0,
+            null(),
+            data_size,
+            &mut data_used,
+            devices.as_mut_ptr() as *mut _,
+        );
+
+        if status != K_CMIO_HARDWARE_NO_ERROR {
+            log::warn!("Failed to get camera devices for listeners");
+            return;
+        }
+
+        // Register listener for each device's "is running somewhere" property
+        let running_prop = CMIOObjectPropertyAddress {
+            selector: K_CMIO_DEVICE_PROPERTY_DEVICE_IS_RUNNING_SOMEWHERE,
+            scope: K_CMIO_OBJECT_PROPERTY_SCOPE_GLOBAL,
+            element: K_CMIO_OBJECT_PROPERTY_ELEMENT_MAIN,
+        };
+
+        for device_id in devices {
+            if !CMIOObjectHasProperty(device_id, &running_prop) {
+                continue;
+            }
+
+            let status = CMIOObjectAddPropertyListener(
+                device_id,
+                &running_prop,
+                camera_property_changed,
+                std::ptr::null_mut(),
+            );
+
+            if status == K_CMIO_HARDWARE_NO_ERROR {
+                log::debug!("Registered camera listener for device {}", device_id);
+            }
+        }
+
+        log::info!(
+            "Camera property listeners registered for {} devices",
+            device_count
+        );
+    }
 }
 
 /// Checks if camera is currently in use via native CoreMediaIO API.
@@ -158,11 +293,18 @@ fn check_camera_usage_native() -> bool {
             &mut data_size,
         );
 
-        if status != K_CMIO_HARDWARE_NO_ERROR || data_size == 0 {
+        if status != K_CMIO_HARDWARE_NO_ERROR {
+            log::debug!("Camera: failed to get device list size, status={}", status);
+            return false;
+        }
+
+        if data_size == 0 {
+            log::debug!("Camera: no devices found");
             return false;
         }
 
         let device_count = data_size as usize / std::mem::size_of::<CMIOObjectID>();
+        log::debug!("Camera: found {} devices", device_count);
         let mut devices: Vec<CMIOObjectID> = vec![0; device_count];
 
         let mut data_used: u32 = 0;
@@ -177,6 +319,7 @@ fn check_camera_usage_native() -> bool {
         );
 
         if status != K_CMIO_HARDWARE_NO_ERROR {
+            log::debug!("Camera: failed to get device list, status={}", status);
             return false;
         }
 
@@ -189,6 +332,7 @@ fn check_camera_usage_native() -> bool {
 
         for device_id in devices {
             if !CMIOObjectHasProperty(device_id, &running_prop) {
+                log::trace!("Camera: device {} doesn't have running property", device_id);
                 continue;
             }
 
@@ -205,8 +349,12 @@ fn check_camera_usage_native() -> bool {
                 &mut is_running as *mut _ as *mut _,
             );
 
-            if status == K_CMIO_HARDWARE_NO_ERROR && is_running != 0 {
-                return true;
+            if status == K_CMIO_HARDWARE_NO_ERROR {
+                log::trace!("Camera: device {} is_running={}", device_id, is_running);
+                if is_running != 0 {
+                    log::debug!("Camera: device {} is running!", device_id);
+                    return true;
+                }
             }
         }
 

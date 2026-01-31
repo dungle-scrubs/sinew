@@ -152,6 +152,89 @@ impl PanelView {
                         .child(self.render_color_swatch(self.theme.info, "info")),
                 ),
             )
+            // Three-column content section
+            .child(
+                self.render_section(
+                    "CONTENT COLUMNS",
+                    div()
+                        .flex()
+                        .flex_row()
+                        .gap(px(16.0))
+                        .w_full()
+                        // Column 1: Task list
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .flex_1()
+                                .gap(px(8.0))
+                                .p(px(12.0))
+                                .rounded(px(8.0))
+                                .bg(self.theme.surface)
+                                .child(
+                                    div()
+                                        .text_color(self.theme.foreground)
+                                        .text_size(px(14.0))
+                                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                                        .child(SharedString::from("Tasks")),
+                                )
+                                .child(self.render_task_item("completed", "Review PR #42", true))
+                                .child(self.render_task_item("in_progress", "Update documentation", false))
+                                .child(self.render_task_item("pending", "Deploy to staging", false)),
+                        )
+                        // Column 2: Stats/metrics
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .flex_1()
+                                .gap(px(8.0))
+                                .p(px(12.0))
+                                .rounded(px(8.0))
+                                .bg(self.theme.surface)
+                                .child(
+                                    div()
+                                        .text_color(self.theme.foreground)
+                                        .text_size(px(14.0))
+                                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                                        .child(SharedString::from("Metrics")),
+                                )
+                                .child(self.render_metric("CPU Usage", "24%", self.theme.success))
+                                .child(self.render_metric("Memory", "4.2 GB", self.theme.warning))
+                                .child(self.render_metric("Disk I/O", "120 MB/s", self.theme.accent)),
+                        )
+                        // Column 3: Notes
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .flex_1()
+                                .gap(px(8.0))
+                                .p(px(12.0))
+                                .rounded(px(8.0))
+                                .bg(self.theme.surface)
+                                .child(
+                                    div()
+                                        .text_color(self.theme.foreground)
+                                        .text_size(px(14.0))
+                                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                                        .child(SharedString::from("Notes")),
+                                )
+                                .child(
+                                    div()
+                                        .text_color(self.theme.foreground)
+                                        .text_size(px(12.0))
+                                        .child(SharedString::from("Remember to check the logs for any errors before deploying.")),
+                                )
+                                .child(
+                                    div()
+                                        .text_color(self.theme.foreground_muted)
+                                        .text_size(px(11.0))
+                                        .child(SharedString::from("Last updated: 2 hours ago")),
+                                ),
+                        ),
+                ),
+            )
     }
 
     fn render_section(&self, title: &str, content: gpui::Div) -> gpui::Div {
@@ -223,6 +306,59 @@ impl PanelView {
                     .text_color(self.theme.foreground_muted)
                     .text_size(px(10.0))
                     .child(SharedString::from(label.to_string())),
+            )
+    }
+
+    fn render_task_item(&self, status: &str, text: &str, completed: bool) -> gpui::Div {
+        let (icon, color) = match status {
+            "completed" => ("✓", self.theme.success),
+            "in_progress" => ("●", self.theme.warning),
+            _ => (" ", self.theme.foreground_muted),
+        };
+
+        let text_color = if completed {
+            self.theme.foreground_muted
+        } else {
+            self.theme.foreground
+        };
+
+        div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(px(8.0))
+            .child(
+                div()
+                    .text_color(color)
+                    .text_size(px(12.0))
+                    .child(SharedString::from(icon.to_string())),
+            )
+            .child(
+                div()
+                    .text_color(text_color)
+                    .text_size(px(12.0))
+                    .child(SharedString::from(text.to_string())),
+            )
+    }
+
+    fn render_metric(&self, label: &str, value: &str, color: Rgba) -> gpui::Div {
+        div()
+            .flex()
+            .flex_row()
+            .justify_between()
+            .items_center()
+            .child(
+                div()
+                    .text_color(self.theme.foreground_muted)
+                    .text_size(px(12.0))
+                    .child(SharedString::from(label.to_string())),
+            )
+            .child(
+                div()
+                    .text_color(color)
+                    .text_size(px(12.0))
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .child(SharedString::from(value.to_string())),
             )
     }
 }

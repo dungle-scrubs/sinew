@@ -1,20 +1,42 @@
 //! GPUI bar view implementation.
 
-use gpui::{div, prelude::*, px, Context, MouseButton, ParentElement, Rgba, Styled, Window};
-use objc2::MainThreadMarker;
-use objc2_app_kit::NSEvent;
+use gpui::{
+    div, prelude::*, px, Context, MouseButton, ParentElement, Rgba, Styled, Task, WeakEntity,
+    Window,
+};
 use std::process::Command;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::RwLock;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::config::{load_config, Config, ConfigWatcher, SharedConfig};
 use crate::gpui_app::camera;
-use crate::gpui_app::modules::{create_module, PopupAnchor, PositionedModule};
-use crate::gpui_app::popup_manager::PopupAlign;
-use crate::gpui_app::primitives::skeleton::Skeleton;
+use crate::gpui_app::modules::{create_module, PositionedModule};
 use crate::gpui_app::theme::Theme;
-use crate::window::WindowPosition;
+
+/// Global registry of all bar views for synchronized updates
+static BAR_VIEWS: Mutex<Vec<WeakEntity<BarView>>> = Mutex::new(Vec::new());
+
+/// Flag to ensure only one refresh task runs globally
+static REFRESH_TASK_STARTED: AtomicBool = AtomicBool::new(false);
+
+/// Information about the notch for rendering a gap
+#[derive(Debug, Clone)]
+pub struct NotchInfo {
+    /// Width of the left area (before notch)
+    pub left_width: f64,
+    /// Width of the right area (after notch)
+    pub right_width: f64,
+    /// Width of the notch itself
+    pub notch_width: f64,
+    /// Whether this is a fake notch (vs hardware notch)
+    pub is_fake: bool,
+    /// Color for fake notch (None = transparent for real notch)
+    pub fake_color: Option<Rgba>,
+    /// Corner radius for fake notch
+    pub corner_radius: f64,
+}
 
 /// Zone within a bar window
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,24 +53,35 @@ pub struct BarView {
     config_watcher: Option<ConfigWatcher>,
     config_version: u64,
     theme: Theme,
-    position: WindowPosition,
-    outer_modules: Vec<PositionedModule>,
-    inner_modules: Vec<PositionedModule>,
+    /// Notch info for rendering gap (None = no notch, full width)
+    notch_info: Option<NotchInfo>,
+    /// Left side outer modules (far left edge)
+    left_outer_modules: Vec<PositionedModule>,
+    /// Left side inner modules (toward notch/center)
+    left_inner_modules: Vec<PositionedModule>,
+    /// Right side outer modules (toward notch/center)
+    right_outer_modules: Vec<PositionedModule>,
+    /// Right side inner modules (far right edge)
+    right_inner_modules: Vec<PositionedModule>,
     last_update: Instant,
     update_interval: Duration,
-    /// Cached camera state to detect changes between renders
-    last_camera_state: bool,
+    camera_indicator: bool,
+    /// Last known camera active state (for change detection)
+    last_camera_active: bool,
+    /// Task that periodically checks camera state and triggers re-renders
+    #[allow(dead_code)]
+    refresh_task: Option<Task<()>>,
 }
 
 impl BarView {
     pub fn new() -> Self {
-        Self::with_position(WindowPosition::Left)
+        Self::new_with_notch(None)
     }
 
-    pub fn with_position(position: WindowPosition) -> Self {
+    pub fn new_with_notch(notch_info: Option<NotchInfo>) -> Self {
         let config = load_config();
         let theme = Theme::from_config(&config.bar);
-        let (outer_modules, inner_modules) = Self::build_modules(&config, position);
+        let (left_outer, left_inner, right_outer, right_inner) = Self::build_modules(&config);
         let shared_config: SharedConfig = Arc::new(RwLock::new(config));
 
         // Set up config file watcher
@@ -56,95 +89,139 @@ impl BarView {
             .map_err(|e| log::warn!("Failed to set up config watcher: {}", e))
             .ok();
 
+        let update_interval = Duration::from_millis(500);
         Self {
             config: shared_config,
             config_watcher,
             config_version: 0,
             theme,
-            position,
-            outer_modules,
-            inner_modules,
-            last_update: Instant::now(),
-            update_interval: Duration::from_millis(500),
-            last_camera_state: false,
+            notch_info,
+            left_outer_modules: left_outer,
+            left_inner_modules: left_inner,
+            right_outer_modules: right_outer,
+            right_inner_modules: right_inner,
+            // Initialize to past so first render triggers update immediately
+            last_update: Instant::now() - update_interval,
+            update_interval,
+            camera_indicator: true, // TODO: read from config
+            last_camera_active: camera::is_camera_active(),
+            refresh_task: None,
         }
     }
 
-    /// Builds modules for a given window position, separated by zone.
+    /// Registers this bar view and starts the global refresh task if needed.
+    /// Uses GPUI's async system to periodically check camera state and trigger re-renders.
+    fn start_refresh_task(&mut self, cx: &Context<Self>) {
+        if self.refresh_task.is_some() {
+            return; // Already registered
+        }
+
+        // Register this bar view in the global registry
+        let weak_self = cx.weak_entity();
+        if let Ok(mut views) = BAR_VIEWS.lock() {
+            views.push(weak_self.clone());
+            log::info!("Registered bar view ({} total)", views.len());
+        }
+
+        // Only start one global refresh task
+        if REFRESH_TASK_STARTED.swap(true, Ordering::SeqCst) {
+            // Task already started by another bar, just store a dummy task
+            self.refresh_task = Some(cx.spawn(async move |_, _| {
+                // This task does nothing - the first bar's task handles everything
+            }));
+            return;
+        }
+
+        // Start the global refresh task
+        let task = cx.spawn(async move |_, cx| {
+            let mut last_camera_active = camera::is_camera_active();
+
+            loop {
+                // Poll every second for camera state changes
+                cx.background_executor().timer(Duration::from_secs(1)).await;
+
+                // Check if camera state changed
+                let current_active = camera::is_camera_active();
+                if current_active != last_camera_active {
+                    log::info!(
+                        "Camera state changed: {} -> {}",
+                        last_camera_active,
+                        current_active
+                    );
+                    last_camera_active = current_active;
+
+                    // Only refresh when camera state actually changes
+                    let _ = cx.refresh();
+                }
+            }
+        });
+
+        self.refresh_task = Some(task);
+        log::info!("Started global camera refresh task");
+    }
+
+    /// Builds modules for the full-width bar, separated into 4 zones.
     fn build_modules(
         config: &Config,
-        position: WindowPosition,
-    ) -> (Vec<PositionedModule>, Vec<PositionedModule>) {
-        let mut outer_modules = Vec::new();
-        let mut inner_modules = Vec::new();
+    ) -> (
+        Vec<PositionedModule>,
+        Vec<PositionedModule>,
+        Vec<PositionedModule>,
+        Vec<PositionedModule>,
+    ) {
+        let mut left_outer = Vec::new();
+        let mut left_inner = Vec::new();
+        let mut right_outer = Vec::new();
+        let mut right_inner = Vec::new();
 
-        match position {
-            WindowPosition::Left => {
-                // Left window: outer = left.outer (left edge), inner = left.inner (toward notch)
-                for (i, cfg) in config.modules.left.outer.iter().enumerate() {
-                    if let Some(module) = create_module(cfg, i) {
-                        outer_modules.push(module);
-                    }
-                }
-                for (i, cfg) in config.modules.left.inner.iter().enumerate() {
-                    if let Some(module) = create_module(cfg, i + 1000) {
-                        inner_modules.push(module);
-                    }
-                }
+        // Left side outer (far left edge)
+        for (i, cfg) in config.modules.left.outer.iter().enumerate() {
+            if let Some(module) = create_module(cfg, i) {
+                left_outer.push(module);
             }
-            WindowPosition::Right => {
-                // Right window: outer = right.outer (toward notch), inner = right.inner (right edge)
-                for (i, cfg) in config.modules.right.outer.iter().enumerate() {
-                    if let Some(module) = create_module(cfg, i + 2000) {
-                        outer_modules.push(module);
-                    }
-                }
-                for (i, cfg) in config.modules.right.inner.iter().enumerate() {
-                    if let Some(module) = create_module(cfg, i + 3000) {
-                        inner_modules.push(module);
-                    }
-                }
-            }
-            WindowPosition::Full => {
-                // Full window: outer = left.outer, inner = right.inner
-                for (i, cfg) in config.modules.left.outer.iter().enumerate() {
-                    if let Some(module) = create_module(cfg, i) {
-                        outer_modules.push(module);
-                    }
-                }
-                // Add left.inner modules to outer (they flow left to right)
-                for (i, cfg) in config.modules.left.inner.iter().enumerate() {
-                    if let Some(module) = create_module(cfg, i + 1000) {
-                        outer_modules.push(module);
-                    }
-                }
-                // Add right.outer modules to inner
-                for (i, cfg) in config.modules.right.outer.iter().enumerate() {
-                    if let Some(module) = create_module(cfg, i + 2000) {
-                        inner_modules.push(module);
-                    }
-                }
-                // Add right.inner modules to inner
-                for (i, cfg) in config.modules.right.inner.iter().enumerate() {
-                    if let Some(module) = create_module(cfg, i + 3000) {
-                        inner_modules.push(module);
-                    }
-                }
+        }
+        // Left side inner (toward notch/center)
+        for (i, cfg) in config.modules.left.inner.iter().enumerate() {
+            if let Some(module) = create_module(cfg, i + 1000) {
+                left_inner.push(module);
             }
         }
 
-        (outer_modules, inner_modules)
+        // Right side outer (toward notch/center)
+        for (i, cfg) in config.modules.right.outer.iter().enumerate() {
+            if let Some(module) = create_module(cfg, i + 2000) {
+                right_outer.push(module);
+            }
+        }
+        // Right side inner (far right edge)
+        for (i, cfg) in config.modules.right.inner.iter().enumerate() {
+            if let Some(module) = create_module(cfg, i + 3000) {
+                right_inner.push(module);
+            }
+        }
+
+        (left_outer, left_inner, right_outer, right_inner)
     }
 
     /// Updates all modules and returns true if any changed.
     fn update_modules(&mut self) -> bool {
         let mut changed = false;
-        for pm in &mut self.outer_modules {
+        for pm in &mut self.left_outer_modules {
             if pm.module.update() {
                 changed = true;
             }
         }
-        for pm in &mut self.inner_modules {
+        for pm in &mut self.left_inner_modules {
+            if pm.module.update() {
+                changed = true;
+            }
+        }
+        for pm in &mut self.right_outer_modules {
+            if pm.module.update() {
+                changed = true;
+            }
+        }
+        for pm in &mut self.right_inner_modules {
             if pm.module.update() {
                 changed = true;
             }
@@ -164,9 +241,12 @@ impl BarView {
                     self.theme = Theme::from_config(&config.bar);
 
                     // Rebuild modules
-                    let (outer, inner) = Self::build_modules(&config, self.position);
-                    self.outer_modules = outer;
-                    self.inner_modules = inner;
+                    let (left_outer, left_inner, right_outer, right_inner) =
+                        Self::build_modules(&config);
+                    self.left_outer_modules = left_outer;
+                    self.left_inner_modules = left_inner;
+                    self.right_outer_modules = right_outer;
+                    self.right_inner_modules = right_inner;
                     self.config_version += 1;
 
                     return true;
@@ -206,16 +286,11 @@ impl BarView {
 
     /// Renders a single module with its styling.
     fn render_module(&self, pm: &PositionedModule) -> gpui::Div {
-        // If module is loading, render skeleton as the container
-        if pm.module.is_loading() {
-            return self.render_skeleton_container(pm);
-        }
-
         // Get the module's rendered element
         let module_element = pm.module.render(&self.theme);
 
-        // Create wrapper with styling - always add some base padding
-        let mut wrapper = div().flex().items_center().px(px(4.0));
+        // Create wrapper with styling
+        let mut wrapper = div().flex().items_center();
 
         // Apply custom text color if configured
         if let Some(color) = pm.text_color {
@@ -231,11 +306,9 @@ impl BarView {
                 wrapper = wrapper.rounded(px(pm.style.corner_radius));
             }
 
-            // Apply additional padding if configured (consistent horizontal and vertical)
+            // Apply padding
             if pm.style.padding > 0.0 {
-                wrapper = wrapper
-                    .px(px(pm.style.padding))
-                    .py(px(pm.style.padding * 0.5));
+                wrapper = wrapper.px(px(pm.style.padding)).py(px(2.0));
             }
         }
 
@@ -256,30 +329,13 @@ impl BarView {
         // Add click handler for popup or command
         if let Some(ref popup_cfg) = pm.popup {
             let popup_type = popup_cfg.popup_type.clone();
-            let anchor = popup_cfg.anchor;
             wrapper = wrapper.on_mouse_down(MouseButton::Left, move |_event, _window, _cx| {
                 log::info!("Module clicked, popup_type={:?}", popup_type);
-
-                // Get mouse position in screen coordinates
-                let (mouse_x, _mouse_y) = get_mouse_screen_position();
-
-                // Convert anchor to align
-                let align = match anchor {
-                    PopupAnchor::Left => PopupAlign::Left,
-                    PopupAnchor::Center => PopupAlign::Center,
-                    PopupAnchor::Right => PopupAlign::Right,
-                };
-
                 // Toggle popups based on type
                 if popup_type.as_deref() == Some("demo") {
                     crate::gpui_app::toggle_demo_panel();
                 } else if popup_type.as_deref() == Some("calendar") {
-                    // Use mouse position as trigger position (popup will center under it)
-                    crate::gpui_app::popup_manager::toggle_calendar_popup_at(
-                        mouse_x - 50.0, // Offset to approximate element center
-                        100.0,          // Approximate element width
-                        align,
-                    );
+                    crate::gpui_app::toggle_calendar_popup();
                 }
             });
         } else if let Some(ref cmd) = pm.click_command {
@@ -299,31 +355,6 @@ impl BarView {
 
         wrapper.child(module_element)
     }
-
-    /// Renders a skeleton as the container for loading modules.
-    /// The skeleton IS the container - it takes on the module's styling and shimmers.
-    fn render_skeleton_container(&self, pm: &PositionedModule) -> gpui::Div {
-        let corner_radius = pm.style.corner_radius;
-        let padding = if pm.style.padding > 0.0 {
-            pm.style.padding + 6.0
-        } else {
-            6.0
-        };
-
-        // Use module's background color or theme surface
-        let bg_color = pm.style.background.unwrap_or(self.theme.surface_hover);
-
-        // Create skeleton that IS the container
-        Skeleton::new()
-            .w(72.0) // Approximate width for loading state
-            .h(24.0) // Standard module height
-            .color(bg_color)
-            .rounded(corner_radius)
-            .shimmer()
-            .render(&self.theme)
-            .px(px(padding))
-            .py(px(2.0))
-    }
 }
 
 /// Execute a shell command in the background.
@@ -334,162 +365,215 @@ fn execute_command(command: &str) {
     });
 }
 
-/// Gets the current mouse position in screen coordinates.
-fn get_mouse_screen_position() -> (f64, f64) {
-    if let Some(_mtm) = MainThreadMarker::new() {
-        let location = NSEvent::mouseLocation();
-        (location.x, location.y)
-    } else {
-        (0.0, 0.0)
-    }
-}
-
 impl Render for BarView {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Start the background refresh task on first render
+        // This uses GPUI's async executor to periodically check camera state
+        self.start_refresh_task(cx);
+
+        // Get entity ID for mouse move handler
+        let entity_id = cx.entity_id();
+
         // Check for config changes and rebuild if needed
         if self.check_config_reload() {
             cx.notify();
         }
 
-        // Update modules periodically
+        // Update modules periodically (rate-limited to every 500ms)
         if self.last_update.elapsed() > self.update_interval {
             self.update_modules();
             self.last_update = Instant::now();
         }
 
-        // Always check camera state (it has its own rate limiting)
-        camera::update_camera_state();
-        let current_camera_state = camera::is_camera_active();
-        self.last_camera_state = current_camera_state;
-
-        // Request next frame to keep this window updating
-        window.request_animation_frame();
-
-        // Determine background color (red tint when camera is active)
-        let bg_color = if current_camera_state {
+        // Determine background color (red tint when camera is active, if enabled)
+        let camera_active = camera::is_camera_active();
+        let bg_color = if self.camera_indicator && camera_active {
+            log::info!("Bar rendering RED (camera active)");
             camera::colors::RECORDING_BACKGROUND
         } else {
+            if self.last_camera_active {
+                // Was active, now inactive - log the transition
+                log::info!("Bar rendering NORMAL (camera inactive)");
+            }
             self.theme.background
         };
+        self.last_camera_active = camera_active;
 
-        // Build outer zone modules
-        let outer_elements: Vec<gpui::Div> = self
-            .outer_modules
+        // Build all 4 module zones
+        let left_outer_elements: Vec<gpui::Div> = self
+            .left_outer_modules
             .iter()
             .map(|pm| self.render_module(pm))
             .collect();
 
-        // Build inner zone modules
-        let inner_elements: Vec<gpui::Div> = self
-            .inner_modules
+        let left_inner_elements: Vec<gpui::Div> = self
+            .left_inner_modules
             .iter()
             .map(|pm| self.render_module(pm))
             .collect();
 
-        // Determine layout based on window position
-        match self.position {
-            WindowPosition::Left => {
-                // Left window: outer on left, spacer, inner on right
-                div()
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .w_full()
-                    .h_full()
-                    .bg(bg_color)
-                    .px(px(12.0))
-                    .py(px(2.0))
-                    .child(
-                        // Outer zone (left-aligned)
-                        div()
-                            .flex()
-                            .flex_row()
-                            .items_center()
-                            .gap(px(8.0))
-                            .children(outer_elements),
-                    )
-                    .child(
-                        // Flexible spacer
-                        div().flex_grow(),
-                    )
-                    .child(
-                        // Inner zone (right-aligned, toward notch)
-                        div()
-                            .flex()
-                            .flex_row()
-                            .items_center()
-                            .gap(px(8.0))
-                            .children(inner_elements),
-                    )
+        let right_outer_elements: Vec<gpui::Div> = self
+            .right_outer_modules
+            .iter()
+            .map(|pm| self.render_module(pm))
+            .collect();
+
+        let right_inner_elements: Vec<gpui::Div> = self
+            .right_inner_modules
+            .iter()
+            .map(|pm| self.render_module(pm))
+            .collect();
+
+        // Single full-width bar with optional notch gap
+        if let Some(ref notch) = self.notch_info {
+            // Notched display: left section | notch gap | right section
+            // Build the notch gap element (transparent for real notch, colored for fake)
+            let mut notch_gap = div().w(px(notch.notch_width as f32)).h_full();
+
+            if let Some(color) = notch.fake_color {
+                // Fake notch: render with configured color and rounded bottom corners
+                notch_gap = notch_gap
+                    .bg(color)
+                    .rounded_bl(px(notch.corner_radius as f32))
+                    .rounded_br(px(notch.corner_radius as f32));
             }
-            WindowPosition::Right => {
-                // Right window: outer on left (toward notch), spacer, inner on right
-                div()
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .w_full()
-                    .h_full()
-                    .bg(bg_color)
-                    .px(px(12.0))
-                    .py(px(2.0))
-                    .child(
-                        // Outer zone (left-aligned, toward notch)
-                        div()
-                            .flex()
-                            .flex_row()
-                            .items_center()
-                            .gap(px(8.0))
-                            .children(outer_elements),
-                    )
-                    .child(
-                        // Flexible spacer
-                        div().flex_grow(),
-                    )
-                    .child(
-                        // Inner zone (right-aligned)
-                        div()
-                            .flex()
-                            .flex_row()
-                            .items_center()
-                            .gap(px(8.0))
-                            .children(inner_elements),
-                    )
-            }
-            WindowPosition::Full => {
-                // Full window: outer on left, spacer, inner on right
-                div()
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .w_full()
-                    .h_full()
-                    .bg(bg_color)
-                    .px(px(12.0))
-                    .py(px(2.0))
-                    .child(
-                        // Left side modules
-                        div()
-                            .flex()
-                            .flex_row()
-                            .items_center()
-                            .gap(px(8.0))
-                            .children(outer_elements),
-                    )
-                    .child(
-                        // Flexible spacer
-                        div().flex_grow(),
-                    )
-                    .child(
-                        // Right side modules
-                        div()
-                            .flex()
-                            .flex_row()
-                            .items_center()
-                            .gap(px(8.0))
-                            .children(inner_elements),
-                    )
-            }
+            // Real notch: leave transparent (no bg set)
+
+            div()
+                .id("bar-root")
+                .flex()
+                .flex_row()
+                .items_center()
+                .w_full()
+                .h_full()
+                .on_mouse_move(move |_event, _window, cx| {
+                    // Trigger re-render for immediate hover state updates
+                    log::trace!("Mouse move detected, notifying");
+                    cx.notify(entity_id);
+                })
+                .child(
+                    // Left section: outer (left edge) | spacer | inner (toward notch)
+                    div()
+                        .flex()
+                        .flex_row()
+                        .items_center()
+                        .h_full()
+                        .w(px(notch.left_width as f32))
+                        .bg(bg_color)
+                        .px(px(8.0))
+                        .child(
+                            // Outer modules (left-aligned)
+                            div()
+                                .flex()
+                                .flex_row()
+                                .items_center()
+                                .gap(px(4.0))
+                                .children(left_outer_elements),
+                        )
+                        .child(
+                            // Flexible spacer
+                            div().flex_grow(),
+                        )
+                        .child(
+                            // Inner modules (right-aligned, toward notch)
+                            div()
+                                .flex()
+                                .flex_row()
+                                .items_center()
+                                .gap(px(4.0))
+                                .children(left_inner_elements),
+                        ),
+                )
+                .child(notch_gap)
+                .child(
+                    // Right section: outer (toward notch) | spacer | inner (right edge)
+                    div()
+                        .flex()
+                        .flex_row()
+                        .items_center()
+                        .h_full()
+                        .w(px(notch.right_width as f32))
+                        .bg(bg_color)
+                        .px(px(8.0))
+                        .child(
+                            // Outer modules (left-aligned, toward notch)
+                            div()
+                                .flex()
+                                .flex_row()
+                                .items_center()
+                                .gap(px(4.0))
+                                .children(right_outer_elements),
+                        )
+                        .child(
+                            // Flexible spacer
+                            div().flex_grow(),
+                        )
+                        .child(
+                            // Inner modules (right-aligned)
+                            div()
+                                .flex()
+                                .flex_row()
+                                .items_center()
+                                .gap(px(4.0))
+                                .children(right_inner_elements),
+                        ),
+                )
+        } else {
+            // Non-notched display: full-width bar
+            // Layout: left_outer | left_inner | spacer | right_outer | right_inner
+            div()
+                .id("bar-root-full")
+                .flex()
+                .flex_row()
+                .items_center()
+                .w_full()
+                .h_full()
+                .bg(bg_color)
+                .px(px(8.0))
+                .on_mouse_move(move |_event, _window, cx| {
+                    // Trigger re-render for immediate hover state updates
+                    cx.notify(entity_id);
+                })
+                .child(
+                    // Left outer modules (far left)
+                    div()
+                        .flex()
+                        .flex_row()
+                        .items_center()
+                        .gap(px(4.0))
+                        .children(left_outer_elements),
+                )
+                .child(
+                    // Left inner modules (toward center)
+                    div()
+                        .flex()
+                        .flex_row()
+                        .items_center()
+                        .gap(px(4.0))
+                        .children(left_inner_elements),
+                )
+                .child(
+                    // Flexible spacer
+                    div().flex_grow(),
+                )
+                .child(
+                    // Right outer modules (toward center)
+                    div()
+                        .flex()
+                        .flex_row()
+                        .items_center()
+                        .gap(px(4.0))
+                        .children(right_outer_elements),
+                )
+                .child(
+                    // Right inner modules (far right)
+                    div()
+                        .flex()
+                        .flex_row()
+                        .items_center()
+                        .gap(px(4.0))
+                        .children(right_inner_elements),
+                )
         }
     }
 }

@@ -39,8 +39,10 @@ impl BatteryModule {
         if let Some(out) = output {
             for line in out.lines() {
                 if line.contains('%') {
-                    // Check for charging
-                    self.charging = line.contains("charging") || line.contains("AC Power");
+                    // Check for charging - only "charging" status, not "charged" or "discharging"
+                    // pmset shows: "charging", "discharging", "charged", "finishing charge"
+                    let lower = line.to_lowercase();
+                    self.charging = lower.contains("charging") && !lower.contains("discharging");
 
                     // Extract percentage
                     if let Some(pct_pos) = line.find('%') {

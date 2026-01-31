@@ -503,6 +503,14 @@ pub struct BarConfig {
     /// Theme configuration for semantic colors
     #[serde(default)]
     pub theme: ThemeConfig,
+    /// Show camera indicator (bar turns red when camera is active)
+    /// Default: true. Note: Updates when user interacts with the bar.
+    #[serde(default = "default_camera_indicator")]
+    pub camera_indicator: bool,
+}
+
+fn default_camera_indicator() -> bool {
+    true
 }
 
 impl Default for BarConfig {
@@ -522,6 +530,7 @@ impl Default for BarConfig {
             popup_background_color: None,
             popup_text_color: None,
             theme: ThemeConfig::default(),
+            camera_indicator: default_camera_indicator(),
         }
     }
 }

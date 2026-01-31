@@ -1,0 +1,305 @@
+//! GPUI module system for bar modules.
+//!
+//! Modules are the functional units that display information in the bar.
+//! Each module implements the GpuiModule trait to render its content.
+
+mod app_name;
+mod battery;
+mod clock;
+mod cpu;
+mod date;
+mod demo;
+mod disk;
+mod memory;
+mod now_playing;
+mod script;
+mod separator;
+mod static_text;
+mod volume;
+mod weather;
+mod wifi;
+mod window_title;
+
+pub use app_name::AppNameModule;
+pub use battery::BatteryModule;
+pub use clock::ClockModule;
+pub use cpu::CpuModule;
+pub use date::DateModule;
+pub use demo::DemoModule;
+pub use disk::DiskModule;
+pub use memory::MemoryModule;
+pub use now_playing::NowPlayingModule;
+pub use script::ScriptModule;
+pub use separator::SeparatorModule;
+pub use static_text::StaticTextModule;
+pub use volume::VolumeModule;
+pub use weather::WeatherModule;
+pub use wifi::WifiModule;
+pub use window_title::WindowTitleModule;
+
+use gpui::AnyElement;
+
+use crate::config::{parse_hex_color, ModuleConfig};
+use crate::gpui_app::theme::Theme;
+
+/// Trait for GPUI-based bar modules.
+pub trait GpuiModule: Send + Sync {
+    /// Returns the unique identifier for this module.
+    fn id(&self) -> &str;
+
+    /// Renders the module as a GPUI element.
+    fn render(&self, theme: &Theme) -> AnyElement;
+
+    /// Updates the module's internal state.
+    /// Returns true if the module needs to be re-rendered.
+    fn update(&mut self) -> bool;
+
+    /// Returns the current value (0-100) for threshold-based coloring.
+    /// Returns None if the module doesn't support value-based colors.
+    fn value(&self) -> Option<u8> {
+        None
+    }
+
+    /// Returns true if the module is currently loading.
+    fn is_loading(&self) -> bool {
+        false
+    }
+}
+
+/// Module styling options.
+#[derive(Debug, Clone, Default)]
+pub struct ModuleStyle {
+    /// Background color (RGBA)
+    pub background: Option<gpui::Rgba>,
+    /// Border color (RGBA)
+    pub border_color: Option<gpui::Rgba>,
+    /// Border width
+    pub border_width: f32,
+    /// Corner radius
+    pub corner_radius: f32,
+    /// Padding
+    pub padding: f32,
+    /// Critical color (for values below critical_threshold)
+    pub critical_color: Option<gpui::Rgba>,
+    /// Warning color (for values below warning_threshold)
+    pub warning_color: Option<gpui::Rgba>,
+    /// Threshold for critical state
+    pub critical_threshold: f32,
+    /// Threshold for warning state
+    pub warning_threshold: f32,
+    /// Background color when toggle is active
+    pub active_background: Option<gpui::Rgba>,
+    /// Border color when toggle is active
+    pub active_border_color: Option<gpui::Rgba>,
+    /// Text color when toggle is active
+    pub active_text_color: Option<gpui::Rgba>,
+}
+
+/// Popup configuration for a module.
+#[derive(Debug, Clone, Default)]
+pub struct PopupConfig {
+    /// Popup type: "calendar", "info", "script", "panel"
+    pub popup_type: Option<String>,
+    /// Popup width
+    pub width: f32,
+    /// Maximum height as percentage of available space (0-100)
+    pub max_height_percent: f32,
+    /// Command for script-type popup
+    pub command: Option<String>,
+    /// Anchor position
+    pub anchor: PopupAnchor,
+}
+
+/// Popup anchor position.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PopupAnchor {
+    Left,
+    #[default]
+    Center,
+    Right,
+}
+
+/// A positioned module within the bar.
+pub struct PositionedModule {
+    /// The module implementation
+    pub module: Box<dyn GpuiModule>,
+    /// Visual styling
+    pub style: ModuleStyle,
+    /// Custom text color (overrides theme)
+    pub text_color: Option<gpui::Rgba>,
+    /// Command to run when clicked
+    pub click_command: Option<String>,
+    /// Command to run when right-clicked
+    pub right_click_command: Option<String>,
+    /// Group ID for shared backgrounds
+    pub group: Option<String>,
+    /// Popup configuration
+    pub popup: Option<PopupConfig>,
+    /// Whether toggle behavior is enabled
+    pub toggle_enabled: bool,
+    /// Current toggle state
+    pub toggle_active: bool,
+    /// Toggle group ID for radio-button behavior
+    pub toggle_group: Option<String>,
+    /// Whether this is a flex-width module
+    pub flex: bool,
+    /// Minimum width for flex modules
+    pub min_width: Option<f32>,
+    /// Maximum width for flex modules
+    pub max_width: Option<f32>,
+}
+
+/// Truncates text to a maximum number of characters, adding an ellipsis if truncated.
+pub fn truncate_text(text: &str, max_chars: usize) -> String {
+    if text.chars().count() > max_chars {
+        let truncated: String = text.chars().take(max_chars.saturating_sub(1)).collect();
+        format!("{}…", truncated)
+    } else {
+        text.to_string()
+    }
+}
+
+/// Creates a module from configuration.
+pub fn create_module(config: &ModuleConfig, index: usize) -> Option<PositionedModule> {
+    let id = config
+        .id
+        .clone()
+        .unwrap_or_else(|| format!("{}-{}", config.module_type, index));
+
+    let module: Option<Box<dyn GpuiModule>> = match config.module_type.as_str() {
+        "clock" => {
+            let format = config.format.as_deref().unwrap_or("%a %b %d  %H:%M:%S");
+            Some(Box::new(ClockModule::new(&id, format)))
+        }
+        "date" => {
+            let format = config.format.as_deref().unwrap_or("%a %b %d");
+            Some(Box::new(DateModule::new(&id, format)))
+        }
+        "battery" => Some(Box::new(BatteryModule::new(&id, config.label.as_deref()))),
+        "volume" => Some(Box::new(VolumeModule::new(&id))),
+        "cpu" => Some(Box::new(CpuModule::new(&id, config.label.as_deref()))),
+        "memory" => Some(Box::new(MemoryModule::new(&id, config.label.as_deref()))),
+        "disk" => {
+            let path = config.path.as_deref().unwrap_or("/");
+            Some(Box::new(DiskModule::new(
+                &id,
+                path,
+                config.label.as_deref(),
+            )))
+        }
+        "wifi" => Some(Box::new(WifiModule::new(&id))),
+        "app_name" => {
+            let max_len = config.max_length.map(|v| v as usize).unwrap_or(30);
+            Some(Box::new(AppNameModule::new(&id, max_len)))
+        }
+        "window_title" => {
+            let max_len = config.max_length.map(|v| v as usize).unwrap_or(50);
+            Some(Box::new(WindowTitleModule::new(&id, max_len)))
+        }
+        "now_playing" => {
+            let max_len = config.max_length.map(|v| v as usize).unwrap_or(40);
+            Some(Box::new(NowPlayingModule::new(&id, max_len)))
+        }
+        "weather" => {
+            let location = config.location.as_deref().unwrap_or("auto");
+            let interval = config.update_interval.unwrap_or(600);
+            Some(Box::new(WeatherModule::new(&id, location, interval)))
+        }
+        "script" => {
+            let command = config.command.as_deref().unwrap_or("echo 'no command'");
+            let interval = config.interval.map(|v| v as u64);
+            let icon = config.icon.as_deref();
+            Some(Box::new(ScriptModule::new(&id, command, interval, icon)))
+        }
+        "static" => {
+            let text = config.text.as_deref().unwrap_or("");
+            let icon = config.icon.as_deref();
+            Some(Box::new(StaticTextModule::new(&id, text, icon)))
+        }
+        "separator" => {
+            let sep_type = config.separator_type.as_deref().unwrap_or("space");
+            let width = config.separator_width.unwrap_or(8.0) as f32;
+            Some(Box::new(SeparatorModule::new(&id, sep_type, width)))
+        }
+        "demo" => Some(Box::new(DemoModule::new(&id))),
+        unknown => {
+            log::warn!("Unknown module type: {}", unknown);
+            None
+        }
+    };
+
+    // Parse style
+    let style = parse_module_style(config);
+
+    // Parse text color
+    fn to_rgba(hex: &str) -> Option<gpui::Rgba> {
+        let (r, g, b, a) = parse_hex_color(hex)?;
+        Some(gpui::Rgba {
+            r: r as f32,
+            g: g as f32,
+            b: b as f32,
+            a: a as f32,
+        })
+    }
+    let text_color = config.color.as_ref().and_then(|c| to_rgba(c));
+
+    // Parse popup config
+    let popup = config.popup.as_ref().map(|popup_type| {
+        let anchor = match config.popup_anchor.as_deref() {
+            Some("left") => PopupAnchor::Left,
+            Some("right") => PopupAnchor::Right,
+            _ => PopupAnchor::Center,
+        };
+        PopupConfig {
+            popup_type: Some(popup_type.clone()),
+            width: config.popup_width.unwrap_or(200.0) as f32,
+            max_height_percent: config.popup_max_height.unwrap_or(50.0).clamp(0.0, 100.0) as f32,
+            command: config.popup_command.clone(),
+            anchor,
+        }
+    });
+
+    module.map(|m| PositionedModule {
+        module: m,
+        style,
+        text_color,
+        click_command: config.click_command.clone(),
+        right_click_command: config.right_click_command.clone(),
+        group: config.group.clone(),
+        popup,
+        toggle_enabled: config.toggle,
+        toggle_active: false,
+        toggle_group: config.toggle_group.clone(),
+        flex: config.flex,
+        min_width: config.min_width.map(|v| v as f32),
+        max_width: config.max_width.map(|v| v as f32),
+    })
+}
+
+/// Parses module style from config.
+fn parse_module_style(config: &ModuleConfig) -> ModuleStyle {
+    fn to_rgba(hex: &str) -> Option<gpui::Rgba> {
+        let (r, g, b, a) = parse_hex_color(hex)?;
+        Some(gpui::Rgba {
+            r: r as f32,
+            g: g as f32,
+            b: b as f32,
+            a: a as f32,
+        })
+    }
+
+    ModuleStyle {
+        background: config.background.as_ref().and_then(|c| to_rgba(c)),
+        border_color: config.border_color.as_ref().and_then(|c| to_rgba(c)),
+        border_width: config.border_width.unwrap_or(0.0) as f32,
+        corner_radius: config.corner_radius.unwrap_or(0.0) as f32,
+        padding: config.padding.unwrap_or(0.0) as f32,
+        critical_color: config.critical_color.as_ref().and_then(|c| to_rgba(c)),
+        warning_color: config.warning_color.as_ref().and_then(|c| to_rgba(c)),
+        critical_threshold: config.critical_threshold.unwrap_or(20.0) as f32,
+        warning_threshold: config.warning_threshold.unwrap_or(40.0) as f32,
+        active_background: config.active_background.as_ref().and_then(|c| to_rgba(c)),
+        active_border_color: config.active_border_color.as_ref().and_then(|c| to_rgba(c)),
+        active_text_color: config.active_color.as_ref().and_then(|c| to_rgba(c)),
+    }
+}

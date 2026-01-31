@@ -1,0 +1,494 @@
+//! Popup and panel window management.
+//!
+//! Uses direct NSWindow manipulation to show/hide popups without
+//! requiring GPUI async context updates (which can cause deadlocks).
+
+use block2::RcBlock;
+use objc2::rc::Retained;
+use objc2::runtime::AnyObject;
+use objc2::MainThreadMarker;
+use objc2_app_kit::{NSApplication, NSEvent, NSEventMask};
+use std::cell::RefCell;
+use std::ptr::NonNull;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// Global visibility state for the demo panel.
+static DEMO_PANEL_VISIBLE: AtomicBool = AtomicBool::new(false);
+
+/// Global visibility state for the calendar popup.
+static CALENDAR_POPUP_VISIBLE: AtomicBool = AtomicBool::new(false);
+
+// Thread-local storage for the event monitor (only accessed from main thread).
+thread_local! {
+    static EVENT_MONITOR: RefCell<Option<Retained<AnyObject>>> = const { RefCell::new(None) };
+}
+
+/// Panel window height - used to identify the panel window.
+const PANEL_HEIGHT_THRESHOLD: f64 = 100.0;
+
+/// Toggles the demo panel visibility.
+/// Returns the new visibility state.
+pub fn toggle_demo_panel() -> bool {
+    let was_visible = DEMO_PANEL_VISIBLE.fetch_xor(true, Ordering::SeqCst);
+    let now_visible = !was_visible;
+
+    log::info!(
+        "toggle_demo_panel: was_visible={}, now_visible={}",
+        was_visible,
+        now_visible
+    );
+
+    // Toggle the NSWindow visibility directly
+    toggle_panel_window(now_visible);
+
+    now_visible
+}
+
+/// Returns whether the demo panel is currently visible.
+pub fn is_demo_panel_visible() -> bool {
+    DEMO_PANEL_VISIBLE.load(Ordering::SeqCst)
+}
+
+/// Shows the demo panel.
+pub fn show_demo_panel() {
+    if !DEMO_PANEL_VISIBLE.swap(true, Ordering::SeqCst) {
+        toggle_panel_window(true);
+    }
+}
+
+/// Hides the demo panel.
+pub fn hide_demo_panel() {
+    if DEMO_PANEL_VISIBLE.swap(false, Ordering::SeqCst) {
+        toggle_panel_window(false);
+    }
+}
+
+/// Toggles the panel NSWindow visibility using AppKit.
+fn toggle_panel_window(visible: bool) {
+    let Some(mtm) = MainThreadMarker::new() else {
+        log::error!("toggle_panel_window: not on main thread");
+        return;
+    };
+
+    let app = NSApplication::sharedApplication(mtm);
+    let windows = app.windows();
+
+    log::debug!(
+        "toggle_panel_window: visible={}, checking {} windows",
+        visible,
+        windows.len()
+    );
+
+    // Find the panel window by its height (panels are taller than bar windows)
+    for i in 0..windows.len() {
+        let ns_window = windows.objectAtIndex(i);
+        let frame = ns_window.frame();
+
+        log::trace!(
+            "Window {}: ({}, {}) size {}x{}, isVisible={}",
+            i,
+            frame.origin.x,
+            frame.origin.y,
+            frame.size.width,
+            frame.size.height,
+            ns_window.isVisible()
+        );
+
+        if frame.size.height > PANEL_HEIGHT_THRESHOLD {
+            log::debug!(
+                "Found panel window at ({}, {}) size {}x{}, isVisible={}",
+                frame.origin.x,
+                frame.origin.y,
+                frame.size.width,
+                frame.size.height,
+                ns_window.isVisible()
+            );
+
+            if visible {
+                // Show the window - set to floating level (above normal windows), alpha to 1
+                // NSFloatingWindowLevel = 3
+                unsafe {
+                    let _: () = objc2::msg_send![&ns_window, setLevel: 3_i64];
+                }
+                ns_window.setAlphaValue(1.0);
+                ns_window.makeKeyAndOrderFront(None);
+
+                // Start monitoring for outside clicks
+                start_global_click_monitor(mtm);
+
+                log::info!(
+                    "Panel window shown, isVisible={}, alpha={}, level={:?}",
+                    ns_window.isVisible(),
+                    ns_window.alphaValue(),
+                    ns_window.level()
+                );
+            } else {
+                // Hide the window - set back to menu bar level and alpha to 0
+                unsafe {
+                    let _: () = objc2::msg_send![&ns_window, setLevel: -20_i64];
+                }
+                ns_window.setAlphaValue(0.0);
+
+                // Remove click monitor if no popups are visible
+                if !CALENDAR_POPUP_VISIBLE.load(Ordering::SeqCst) {
+                    remove_global_click_monitor();
+                }
+
+                log::info!(
+                    "Panel window hidden, isVisible={}, alpha={}",
+                    ns_window.isVisible(),
+                    ns_window.alphaValue()
+                );
+            }
+            return;
+        }
+    }
+
+    log::warn!(
+        "toggle_panel_window: no panel window found (checked {} windows)",
+        windows.len()
+    );
+}
+
+/// Hides the panel window immediately after creation.
+/// Call this from the window creation code.
+pub fn hide_panel_on_create() {
+    DEMO_PANEL_VISIBLE.store(false, Ordering::SeqCst);
+    toggle_panel_window(false);
+}
+
+// ============================================================================
+// Calendar Popup Management
+// ============================================================================
+
+/// Popup alignment options.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PopupAlign {
+    Left,
+    #[default]
+    Center,
+    Right,
+}
+
+/// Toggles the calendar popup visibility at the specified position.
+///
+/// # Arguments
+/// * `trigger_x` - X position of the trigger element (screen coordinates)
+/// * `trigger_width` - Width of the trigger element
+/// * `align` - Alignment of popup relative to trigger
+pub fn toggle_calendar_popup_at(trigger_x: f64, trigger_width: f64, align: PopupAlign) -> bool {
+    // First, hide any other popups
+    if DEMO_PANEL_VISIBLE.swap(false, Ordering::SeqCst) {
+        toggle_panel_window(false);
+    }
+
+    let was_visible = CALENDAR_POPUP_VISIBLE.fetch_xor(true, Ordering::SeqCst);
+    let now_visible = !was_visible;
+
+    log::info!(
+        "toggle_calendar_popup_at: trigger_x={}, trigger_width={}, align={:?}, was_visible={}, now_visible={}",
+        trigger_x, trigger_width, align, was_visible, now_visible
+    );
+
+    if now_visible {
+        // Reposition the calendar window before showing
+        reposition_calendar_window(trigger_x, trigger_width, align);
+    }
+
+    toggle_calendar_window(now_visible);
+    now_visible
+}
+
+/// Toggles the calendar popup visibility (uses last known position).
+pub fn toggle_calendar_popup() -> bool {
+    // First, hide any other popups
+    if DEMO_PANEL_VISIBLE.swap(false, Ordering::SeqCst) {
+        toggle_panel_window(false);
+    }
+
+    let was_visible = CALENDAR_POPUP_VISIBLE.fetch_xor(true, Ordering::SeqCst);
+    let now_visible = !was_visible;
+
+    log::info!(
+        "toggle_calendar_popup: was_visible={}, now_visible={}",
+        was_visible,
+        now_visible
+    );
+
+    toggle_calendar_window(now_visible);
+    now_visible
+}
+
+/// Hides the calendar popup.
+pub fn hide_calendar_popup() {
+    if CALENDAR_POPUP_VISIBLE.swap(false, Ordering::SeqCst) {
+        toggle_calendar_window(false);
+    }
+}
+
+/// Hides all popups.
+pub fn hide_all_popups() {
+    let panel_was_visible = DEMO_PANEL_VISIBLE.swap(false, Ordering::SeqCst);
+    let calendar_was_visible = CALENDAR_POPUP_VISIBLE.swap(false, Ordering::SeqCst);
+
+    if panel_was_visible || calendar_was_visible {
+        log::info!(
+            "hide_all_popups: panel_was_visible={}, calendar_was_visible={}",
+            panel_was_visible,
+            calendar_was_visible
+        );
+
+        // Hide windows
+        if let Some(mtm) = MainThreadMarker::new() {
+            let app = NSApplication::sharedApplication(mtm);
+            let windows = app.windows();
+
+            for i in 0..windows.len() {
+                let ns_window = windows.objectAtIndex(i);
+                let frame = ns_window.frame();
+
+                // Hide large windows (panels and calendar popups)
+                if frame.size.height > 100.0 {
+                    unsafe {
+                        let _: () = objc2::msg_send![&ns_window, setLevel: -20_i64];
+                    }
+                    ns_window.setAlphaValue(0.0);
+                }
+            }
+        }
+
+        // Remove the click monitor
+        remove_global_click_monitor();
+    }
+}
+
+/// Starts a global event monitor to detect clicks outside popup windows.
+/// Must be called from the main thread.
+fn start_global_click_monitor(_mtm: MainThreadMarker) {
+    // Check if we already have a monitor
+    let already_active = EVENT_MONITOR.with(|cell| cell.borrow().is_some());
+    if already_active {
+        log::debug!("Global click monitor already active");
+        return;
+    }
+
+    log::info!("Starting global click monitor");
+
+    // Create a block that handles mouse down events
+    // The block receives NonNull<NSEvent>
+    let handler = RcBlock::new(|event: NonNull<NSEvent>| {
+        // Safety: event pointer is valid during callback
+        let event: &NSEvent = unsafe { event.as_ref() };
+        handle_global_click(event);
+    });
+
+    // Register the global monitor for left mouse down events
+    let mask = NSEventMask::LeftMouseDown;
+
+    let monitor: Option<Retained<AnyObject>> =
+        NSEvent::addGlobalMonitorForEventsMatchingMask_handler(mask, &handler);
+
+    if let Some(mon) = monitor {
+        log::info!("Global click monitor registered");
+        EVENT_MONITOR.with(|cell| {
+            *cell.borrow_mut() = Some(mon);
+        });
+    } else {
+        log::error!("Failed to register global click monitor");
+    }
+}
+
+/// Removes the global event monitor.
+fn remove_global_click_monitor() {
+    EVENT_MONITOR.with(|cell| {
+        if let Some(monitor) = cell.borrow_mut().take() {
+            log::info!("Removing global click monitor");
+            unsafe {
+                NSEvent::removeMonitor(&monitor);
+            }
+        }
+    });
+}
+
+/// Handles a global click event. If the click is outside popup windows, hides all popups.
+fn handle_global_click(event: &NSEvent) {
+    // Get click location in screen coordinates
+    let location = event.locationInWindow();
+
+    // For global events, locationInWindow is in screen coordinates
+    let screen_x = location.x;
+    let screen_y = location.y;
+
+    log::debug!("Global click at screen ({}, {})", screen_x, screen_y);
+
+    // Check if click is inside any popup window
+    let Some(mtm) = MainThreadMarker::new() else {
+        return;
+    };
+
+    let app = NSApplication::sharedApplication(mtm);
+    let windows = app.windows();
+
+    for i in 0..windows.len() {
+        let ns_window = windows.objectAtIndex(i);
+        let frame = ns_window.frame();
+
+        // Only check popup windows (height > 100 and visible with alpha > 0)
+        if frame.size.height > 100.0 && ns_window.alphaValue() > 0.5 {
+            // Check if click is inside this window's frame
+            if screen_x >= frame.origin.x
+                && screen_x <= frame.origin.x + frame.size.width
+                && screen_y >= frame.origin.y
+                && screen_y <= frame.origin.y + frame.size.height
+            {
+                log::debug!("Click is inside popup window, ignoring");
+                return;
+            }
+        }
+    }
+
+    // Also check if click is on the bar windows (don't close for bar clicks, let them toggle)
+    for i in 0..windows.len() {
+        let ns_window = windows.objectAtIndex(i);
+        let frame = ns_window.frame();
+
+        // Bar windows have height <= 40
+        if frame.size.height <= 40.0 && frame.size.height > 20.0 {
+            if screen_x >= frame.origin.x
+                && screen_x <= frame.origin.x + frame.size.width
+                && screen_y >= frame.origin.y
+                && screen_y <= frame.origin.y + frame.size.height
+            {
+                log::debug!("Click is on bar window, letting toggle handlers deal with it");
+                return;
+            }
+        }
+    }
+
+    // Click is outside all our windows, hide popups
+    log::info!("Click outside popups detected, hiding all popups");
+    hide_all_popups();
+}
+
+/// Hides the calendar window immediately after creation.
+pub fn hide_calendar_on_create() {
+    CALENDAR_POPUP_VISIBLE.store(false, Ordering::SeqCst);
+    toggle_calendar_window(false);
+}
+
+/// Toggles the calendar popup window visibility.
+fn toggle_calendar_window(visible: bool) {
+    let Some(mtm) = MainThreadMarker::new() else {
+        log::error!("toggle_calendar_window: not on main thread");
+        return;
+    };
+
+    let app = NSApplication::sharedApplication(mtm);
+    let windows = app.windows();
+
+    // Find the calendar window by its size (smaller than panel but bigger than bar)
+    for i in 0..windows.len() {
+        let ns_window = windows.objectAtIndex(i);
+        let frame = ns_window.frame();
+
+        // Match calendar by approximate size
+        let is_calendar = frame.size.width > 250.0
+            && frame.size.width < 350.0
+            && frame.size.height > 250.0
+            && frame.size.height < 400.0;
+
+        if is_calendar {
+            log::debug!(
+                "Found calendar window at ({}, {}) size {}x{}",
+                frame.origin.x,
+                frame.origin.y,
+                frame.size.width,
+                frame.size.height
+            );
+
+            if visible {
+                unsafe {
+                    let _: () = objc2::msg_send![&ns_window, setLevel: 3_i64];
+                }
+                ns_window.setAlphaValue(1.0);
+                ns_window.makeKeyAndOrderFront(None);
+
+                // Start monitoring for outside clicks
+                start_global_click_monitor(mtm);
+
+                log::info!("Calendar popup shown");
+            } else {
+                unsafe {
+                    let _: () = objc2::msg_send![&ns_window, setLevel: -20_i64];
+                }
+                ns_window.setAlphaValue(0.0);
+
+                // Remove click monitor if no popups are visible
+                if !DEMO_PANEL_VISIBLE.load(Ordering::SeqCst) {
+                    remove_global_click_monitor();
+                }
+
+                log::info!("Calendar popup hidden");
+            }
+            return;
+        }
+    }
+
+    log::warn!("toggle_calendar_window: no calendar window found");
+}
+
+/// Repositions the calendar window based on trigger position and alignment.
+fn reposition_calendar_window(trigger_x: f64, trigger_width: f64, align: PopupAlign) {
+    let Some(mtm) = MainThreadMarker::new() else {
+        return;
+    };
+
+    let app = NSApplication::sharedApplication(mtm);
+    let windows = app.windows();
+
+    // Get screen width for edge detection
+    let screen_width = 1512.0; // TODO: get dynamically
+
+    for i in 0..windows.len() {
+        let ns_window = windows.objectAtIndex(i);
+        let frame = ns_window.frame();
+
+        let is_calendar = frame.size.width > 250.0
+            && frame.size.width < 350.0
+            && frame.size.height > 250.0
+            && frame.size.height < 400.0;
+
+        if is_calendar {
+            let popup_width = frame.size.width;
+
+            // Calculate X position based on alignment
+            let mut new_x = match align {
+                PopupAlign::Left => trigger_x,
+                PopupAlign::Center => trigger_x + (trigger_width - popup_width) / 2.0,
+                PopupAlign::Right => trigger_x + trigger_width - popup_width,
+            };
+
+            // Screen edge detection - keep popup on screen
+            if new_x < 0.0 {
+                new_x = 0.0;
+            } else if new_x + popup_width > screen_width {
+                new_x = screen_width - popup_width;
+            }
+
+            let new_frame = objc2_foundation::NSRect::new(
+                objc2_foundation::NSPoint::new(new_x, frame.origin.y),
+                frame.size,
+            );
+            ns_window.setFrame_display(new_frame, false);
+
+            log::info!(
+                "Repositioned calendar to x={} (align={:?}, trigger_x={}, trigger_width={})",
+                new_x,
+                align,
+                trigger_x,
+                trigger_width
+            );
+            return;
+        }
+    }
+}

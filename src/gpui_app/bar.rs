@@ -285,12 +285,16 @@ impl BarView {
     }
 
     /// Renders a single module with its styling.
-    fn render_module(&self, pm: &PositionedModule) -> gpui::Div {
+    fn render_module(&self, pm: &PositionedModule) -> gpui::Stateful<gpui::Div> {
         // Get the module's rendered element
         let module_element = pm.module.render(&self.theme);
 
-        // Create wrapper with styling
-        let mut wrapper = div().flex().items_center();
+        // Create wrapper with styling - needs an id for on_hover to work
+        let module_id = format!("module-{}", pm.module.id());
+        let mut wrapper = div()
+            .id(gpui::SharedString::from(module_id))
+            .flex()
+            .items_center();
 
         // Apply custom text color if configured
         if let Some(color) = pm.text_color {
@@ -319,11 +323,10 @@ impl BarView {
             }
         }
 
-        // Apply hover effect for clickable modules
+        // Show pointer cursor for clickable modules (no hover effect due to window level)
         let is_clickable = pm.click_command.is_some() || pm.popup.is_some();
         if is_clickable {
-            let hover_bg = self.theme.surface_hover;
-            wrapper = wrapper.cursor_pointer().hover(|style| style.bg(hover_bg));
+            wrapper = wrapper.cursor_pointer();
         }
 
         // Add click handler for popup or command
@@ -371,9 +374,6 @@ impl Render for BarView {
         // This uses GPUI's async executor to periodically check camera state
         self.start_refresh_task(cx);
 
-        // Get entity ID for mouse move handler
-        let entity_id = cx.entity_id();
-
         // Check for config changes and rebuild if needed
         if self.check_config_reload() {
             cx.notify();
@@ -400,25 +400,25 @@ impl Render for BarView {
         self.last_camera_active = camera_active;
 
         // Build all 4 module zones
-        let left_outer_elements: Vec<gpui::Div> = self
+        let left_outer_elements: Vec<gpui::Stateful<gpui::Div>> = self
             .left_outer_modules
             .iter()
             .map(|pm| self.render_module(pm))
             .collect();
 
-        let left_inner_elements: Vec<gpui::Div> = self
+        let left_inner_elements: Vec<gpui::Stateful<gpui::Div>> = self
             .left_inner_modules
             .iter()
             .map(|pm| self.render_module(pm))
             .collect();
 
-        let right_outer_elements: Vec<gpui::Div> = self
+        let right_outer_elements: Vec<gpui::Stateful<gpui::Div>> = self
             .right_outer_modules
             .iter()
             .map(|pm| self.render_module(pm))
             .collect();
 
-        let right_inner_elements: Vec<gpui::Div> = self
+        let right_inner_elements: Vec<gpui::Stateful<gpui::Div>> = self
             .right_inner_modules
             .iter()
             .map(|pm| self.render_module(pm))
@@ -446,11 +446,6 @@ impl Render for BarView {
                 .items_center()
                 .w_full()
                 .h_full()
-                .on_mouse_move(move |_event, _window, cx| {
-                    // Trigger re-render for immediate hover state updates
-                    log::trace!("Mouse move detected, notifying");
-                    cx.notify(entity_id);
-                })
                 .child(
                     // Left section: outer (left edge) | spacer | inner (toward notch)
                     div()
@@ -530,10 +525,6 @@ impl Render for BarView {
                 .h_full()
                 .bg(bg_color)
                 .px(px(8.0))
-                .on_mouse_move(move |_event, _window, cx| {
-                    // Trigger re-render for immediate hover state updates
-                    cx.notify(entity_id);
-                })
                 .child(
                     // Left outer modules (far left)
                     div()

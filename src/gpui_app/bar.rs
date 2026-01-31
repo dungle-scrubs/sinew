@@ -204,8 +204,8 @@ impl BarView {
         // Get the module's rendered element
         let module_element = pm.module.render(&self.theme);
 
-        // Create wrapper with styling
-        let mut wrapper = div().flex().items_center();
+        // Create wrapper with styling - always add some base padding
+        let mut wrapper = div().flex().items_center().px(px(6.0));
 
         // Apply custom text color if configured
         if let Some(color) = pm.text_color {
@@ -221,9 +221,9 @@ impl BarView {
                 wrapper = wrapper.rounded(px(pm.style.corner_radius));
             }
 
-            // Apply padding
+            // Apply additional padding if configured
             if pm.style.padding > 0.0 {
-                wrapper = wrapper.px(px(pm.style.padding)).py(px(2.0));
+                wrapper = wrapper.px(px(pm.style.padding + 6.0)).py(px(2.0));
             }
         }
 
@@ -347,14 +347,15 @@ impl Render for BarView {
                     .w_full()
                     .h_full()
                     .bg(self.theme.background)
-                    .px(px(8.0))
+                    .px(px(12.0))
+                    .py(px(2.0))
                     .child(
                         // Outer zone (left-aligned)
                         div()
                             .flex()
                             .flex_row()
                             .items_center()
-                            .gap(px(4.0))
+                            .gap(px(8.0))
                             .children(outer_elements),
                     )
                     .child(
@@ -367,7 +368,7 @@ impl Render for BarView {
                             .flex()
                             .flex_row()
                             .items_center()
-                            .gap(px(4.0))
+                            .gap(px(8.0))
                             .children(inner_elements),
                     )
             }
@@ -380,14 +381,15 @@ impl Render for BarView {
                     .w_full()
                     .h_full()
                     .bg(self.theme.background)
-                    .px(px(8.0))
+                    .px(px(12.0))
+                    .py(px(2.0))
                     .child(
                         // Outer zone (left-aligned, toward notch)
                         div()
                             .flex()
                             .flex_row()
                             .items_center()
-                            .gap(px(4.0))
+                            .gap(px(8.0))
                             .children(outer_elements),
                     )
                     .child(
@@ -400,7 +402,7 @@ impl Render for BarView {
                             .flex()
                             .flex_row()
                             .items_center()
-                            .gap(px(4.0))
+                            .gap(px(8.0))
                             .children(inner_elements),
                     )
             }
@@ -413,14 +415,15 @@ impl Render for BarView {
                     .w_full()
                     .h_full()
                     .bg(self.theme.background)
-                    .px(px(8.0))
+                    .px(px(12.0))
+                    .py(px(2.0))
                     .child(
                         // Left side modules
                         div()
                             .flex()
                             .flex_row()
                             .items_center()
-                            .gap(px(4.0))
+                            .gap(px(8.0))
                             .children(outer_elements),
                     )
                     .child(
@@ -433,7 +436,7 @@ impl Render for BarView {
                             .flex()
                             .flex_row()
                             .items_center()
-                            .gap(px(4.0))
+                            .gap(px(8.0))
                             .children(inner_elements),
                     )
             }

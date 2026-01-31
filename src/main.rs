@@ -5,16 +5,9 @@
 // Allow functions with many arguments for now
 #![allow(clippy::too_many_arguments)]
 
-mod app;
-mod components;
 mod config;
-mod ipc;
-mod modules;
-mod render;
-mod view;
+mod gpui_app;
 mod window;
-
-use objc2::MainThreadMarker;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -47,9 +40,11 @@ For more information, see: https://github.com/dungle-scrubs/rustybar",
 
 fn main() {
     // Handle CLI arguments
-    let args: Vec<String> = std::env::args().collect();
-    if args.len() > 1 {
-        match args[1].as_str() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+
+    if !args.is_empty() {
+        // Only the first argument is processed (flags don't combine)
+        match args[0].as_str() {
             "-h" | "--help" => {
                 print_help();
                 return;
@@ -58,8 +53,8 @@ fn main() {
                 println!("rustybar {}", VERSION);
                 return;
             }
-            arg => {
-                eprintln!("Unknown argument: {}", arg);
+            _ => {
+                eprintln!("Unknown argument: {}", args[0]);
                 eprintln!("Try 'rustybar --help' for more information.");
                 std::process::exit(1);
             }
@@ -71,39 +66,6 @@ fn main() {
 
     log::info!("Starting RustyBar v{}", VERSION);
 
-    // Start IPC server
-    let ipc_server = ipc::IpcServer::new();
-    if let Err(e) = ipc_server.start(|cmd| {
-        match cmd {
-            ipc::IpcCommand::Redraw => {
-                view::bump_config_version();
-                "ok".to_string()
-            }
-            ipc::IpcCommand::Reload => {
-                view::bump_config_version();
-                "ok".to_string()
-            }
-            ipc::IpcCommand::Status => r#"{"status":"running"}"#.to_string(),
-            ipc::IpcCommand::Toggle => {
-                // TODO: implement toggle
-                "ok".to_string()
-            }
-            ipc::IpcCommand::SetValue(id, value) => {
-                log::info!("Set {} = {}", id, value);
-                "ok".to_string()
-            }
-            ipc::IpcCommand::Unknown(s) => {
-                format!("error: unknown command: {}", s)
-            }
-        }
-    }) {
-        log::warn!("Failed to start IPC server: {}", e);
-    }
-
-    // Must run on main thread for AppKit
-    let mtm = MainThreadMarker::new().expect("Must run on main thread");
-
-    // Create and run application (config is loaded internally with hot reload)
-    let app = app::App::new(mtm);
-    app.run(mtm);
+    // Run the GPUI-based application
+    gpui_app::run();
 }

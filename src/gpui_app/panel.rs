@@ -1,8 +1,6 @@
 //! Panel view for full-screen overlays.
 
-use gpui::{
-    div, prelude::*, px, ElementId, MouseButton, ParentElement, Rgba, SharedString, Styled, Window,
-};
+use gpui::{div, prelude::*, px, ElementId, ParentElement, Rgba, SharedString, Styled, Window};
 
 use crate::gpui_app::theme::Theme;
 
@@ -249,10 +247,6 @@ impl Render for PanelView {
             .h_full()
             .bg(self.theme.background)
             .overflow_y_scroll() // Enable vertical scrolling
-            // Click anywhere on panel to close
-            .on_mouse_down(MouseButton::Left, |_event, _window, _cx| {
-                crate::gpui_app::hide_demo_panel();
-            })
             .child(self.render_demo_content())
     }
 }

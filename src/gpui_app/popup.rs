@@ -2,8 +2,8 @@
 
 use chrono::{Datelike, Local, NaiveDate};
 use gpui::{
-    div, point, prelude::*, px, size, App, Bounds, Context, MouseButton, ParentElement, Rgba,
-    SharedString, Styled, Window, WindowBounds, WindowHandle, WindowKind, WindowOptions,
+    div, point, prelude::*, px, size, App, Bounds, Context, ParentElement, Rgba, SharedString,
+    Styled, Window, WindowBounds, WindowHandle, WindowKind, WindowOptions,
 };
 
 use crate::gpui_app::modules::PopupAnchor;
@@ -646,12 +646,14 @@ impl Render for CalendarPopupView {
             .w_full()
             .h_full()
             .bg(self.theme.background)
-            .rounded_b(px(8.0)) // Rounded bottom corners
+            // 3-sided border (left, bottom, right) - no top so it flows from bar
+            .border_color(self.theme.border)
+            .border_l_1()
+            .border_r_1()
+            .border_b_1()
+            .rounded_bl(px(8.0)) // Rounded bottom-left corner
+            .rounded_br(px(8.0)) // Rounded bottom-right corner
             .overflow_hidden()
-            .on_mouse_down(MouseButton::Left, |_event, _window, _cx| {
-                // Clicking anywhere on calendar hides it
-                crate::gpui_app::popup_manager::hide_calendar_popup();
-            })
             .child(self.render_calendar())
     }
 }

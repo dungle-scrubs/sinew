@@ -13,7 +13,7 @@ pub mod popup_manager;
 pub mod primitives;
 pub mod theme;
 
-pub use popup_manager::{toggle_calendar_popup, toggle_demo_panel};
+pub use popup_manager::toggle_demo_panel;
 
 use gpui::{
     point, px, size, App, AppContext, Application, Bounds, WindowBounds, WindowKind, WindowOptions,
@@ -137,7 +137,7 @@ pub fn run() {
         // Position it under the right bar area where the calendar button is
         let calendar_width = 280.0;
         let calendar_height = 320.0;
-        let calendar_x = screen_x + screen_width - calendar_width - 200.0; // Offset from right edge
+        let calendar_x = screen_x + screen_width - calendar_width - 80.0; // Offset from right edge, under date module
 
         create_calendar_window(
             cx,

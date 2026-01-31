@@ -332,13 +332,32 @@ impl BarView {
         // Add click handler for popup or command
         if let Some(ref popup_cfg) = pm.popup {
             let popup_type = popup_cfg.popup_type.clone();
+            let popup_anchor = popup_cfg.anchor;
             wrapper = wrapper.on_mouse_down(MouseButton::Left, move |_event, _window, _cx| {
                 log::info!("Module clicked, popup_type={:?}", popup_type);
                 // Toggle popups based on type
                 if popup_type.as_deref() == Some("demo") {
                     crate::gpui_app::toggle_demo_panel();
                 } else if popup_type.as_deref() == Some("calendar") {
-                    crate::gpui_app::toggle_calendar_popup();
+                    // Get current mouse position for popup positioning
+                    let mouse_pos = get_mouse_screen_position();
+                    let align = match popup_anchor {
+                        crate::gpui_app::modules::PopupAnchor::Left => {
+                            crate::gpui_app::popup_manager::PopupAlign::Left
+                        }
+                        crate::gpui_app::modules::PopupAnchor::Center => {
+                            crate::gpui_app::popup_manager::PopupAlign::Center
+                        }
+                        crate::gpui_app::modules::PopupAnchor::Right => {
+                            crate::gpui_app::popup_manager::PopupAlign::Right
+                        }
+                    };
+                    // Use mouse X as trigger position, assume ~100px module width
+                    crate::gpui_app::popup_manager::toggle_calendar_popup_at(
+                        mouse_pos.0,
+                        100.0,
+                        align,
+                    );
                 }
             });
         } else if let Some(ref cmd) = pm.click_command {
@@ -366,6 +385,13 @@ fn execute_command(command: &str) {
     std::thread::spawn(move || {
         let _ = Command::new("sh").args(["-c", &cmd]).spawn();
     });
+}
+
+/// Get current mouse position in screen coordinates.
+fn get_mouse_screen_position() -> (f64, f64) {
+    use objc2_app_kit::NSEvent;
+    let location = NSEvent::mouseLocation();
+    (location.x, location.y)
 }
 
 impl Render for BarView {

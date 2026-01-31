@@ -13,6 +13,7 @@ mod datetime;
 mod demo;
 mod disk;
 mod memory;
+pub mod news;
 mod now_playing;
 mod script;
 mod separator;
@@ -33,6 +34,7 @@ pub use datetime::DateTimeModule;
 pub use demo::DemoModule;
 pub use disk::DiskModule;
 pub use memory::MemoryModule;
+pub use news::NewsModule;
 pub use now_playing::NowPlayingModule;
 pub use script::ScriptModule;
 pub use separator::SeparatorModule;
@@ -250,6 +252,7 @@ pub fn create_module(config: &ModuleConfig, index: usize) -> Option<PositionedMo
             let interval = config.update_interval.unwrap_or(600);
             Some(Box::new(WeatherModule::new(&id, location, interval)))
         }
+        "news" => Some(Box::new(NewsModule::new(&id))),
         "script" => {
             let command = config.command.as_deref().unwrap_or("echo 'no command'");
             let interval = config.interval.map(|v| v as u64);

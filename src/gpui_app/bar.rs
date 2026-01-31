@@ -303,7 +303,7 @@ impl BarView {
             wrapper = wrapper.on_mouse_down(MouseButton::Left, move |_event, _window, _cx| {
                 log::info!("Module clicked, popup_type={:?}", popup_type);
                 // Toggle popups based on type
-                if popup_type.as_deref() == Some("demo") {
+                if popup_type.as_deref() == Some("demo") || popup_type.as_deref() == Some("news") {
                     crate::gpui_app::toggle_demo_panel();
                 } else if popup_type.as_deref() == Some("calendar") {
                     // Get current mouse position for popup positioning

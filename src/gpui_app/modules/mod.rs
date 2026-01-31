@@ -119,6 +119,15 @@ pub enum PopupAnchor {
     Right,
 }
 
+/// Label text alignment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LabelAlign {
+    Left,
+    #[default]
+    Center,
+    Right,
+}
+
 /// A positioned module within the bar.
 pub struct PositionedModule {
     /// The module implementation
@@ -159,6 +168,15 @@ pub fn truncate_text(text: &str, max_chars: usize) -> String {
     }
 }
 
+/// Parses label alignment from config string.
+fn parse_label_align(align: Option<&str>) -> LabelAlign {
+    match align {
+        Some("left") => LabelAlign::Left,
+        Some("right") => LabelAlign::Right,
+        _ => LabelAlign::Center,
+    }
+}
+
 /// Creates a module from configuration.
 pub fn create_module(config: &ModuleConfig, index: usize) -> Option<PositionedModule> {
     let id = config
@@ -177,14 +195,30 @@ pub fn create_module(config: &ModuleConfig, index: usize) -> Option<PositionedMo
         }
         "battery" => Some(Box::new(BatteryModule::new(&id, config.label.as_deref()))),
         "volume" => Some(Box::new(VolumeModule::new(&id))),
-        "cpu" => Some(Box::new(CpuModule::new(&id, config.label.as_deref()))),
-        "memory" => Some(Box::new(MemoryModule::new(&id, config.label.as_deref()))),
+        "cpu" => {
+            let label_align = parse_label_align(config.label_align.as_deref());
+            Some(Box::new(CpuModule::new(
+                &id,
+                config.label.as_deref(),
+                label_align,
+            )))
+        }
+        "memory" => {
+            let label_align = parse_label_align(config.label_align.as_deref());
+            Some(Box::new(MemoryModule::new(
+                &id,
+                config.label.as_deref(),
+                label_align,
+            )))
+        }
         "disk" => {
             let path = config.path.as_deref().unwrap_or("/");
+            let label_align = parse_label_align(config.label_align.as_deref());
             Some(Box::new(DiskModule::new(
                 &id,
                 path,
                 config.label.as_deref(),
+                label_align,
             )))
         }
         "wifi" => Some(Box::new(WifiModule::new(&id))),

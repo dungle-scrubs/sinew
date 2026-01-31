@@ -18,6 +18,10 @@ static DEMO_PANEL_VISIBLE: AtomicBool = AtomicBool::new(false);
 /// Global visibility state for the calendar popup.
 static CALENDAR_POPUP_VISIBLE: AtomicBool = AtomicBool::new(false);
 
+/// Flag to signal that the calendar should reset its time offset to "now".
+/// Set to true when the popup is shown, consumed by CalendarView on render.
+static CALENDAR_NEEDS_RESET: AtomicBool = AtomicBool::new(false);
+
 // Thread-local storage for the event monitors (only accessed from main thread).
 thread_local! {
     static EVENT_MONITOR: RefCell<Option<Retained<AnyObject>>> = const { RefCell::new(None) };
@@ -172,6 +176,12 @@ pub enum PopupAlign {
     Right,
 }
 
+/// Check if the calendar needs to reset its time offset to "now".
+/// Returns true and clears the flag if it was set.
+pub fn calendar_should_reset() -> bool {
+    CALENDAR_NEEDS_RESET.swap(false, Ordering::SeqCst)
+}
+
 /// Toggles the calendar popup visibility at the specified position.
 ///
 /// # Arguments
@@ -193,6 +203,8 @@ pub fn toggle_calendar_popup_at(trigger_x: f64, trigger_width: f64, align: Popup
     );
 
     if now_visible {
+        // Signal that calendar should reset time to "now"
+        CALENDAR_NEEDS_RESET.store(true, Ordering::SeqCst);
         // Reposition the calendar window before showing
         reposition_calendar_window(trigger_x, trigger_width, align);
     }
@@ -216,6 +228,11 @@ pub fn toggle_calendar_popup() -> bool {
         was_visible,
         now_visible
     );
+
+    if now_visible {
+        // Signal that calendar should reset time to "now"
+        CALENDAR_NEEDS_RESET.store(true, Ordering::SeqCst);
+    }
 
     toggle_calendar_window(now_visible);
     now_visible

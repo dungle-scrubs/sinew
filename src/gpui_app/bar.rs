@@ -21,45 +21,17 @@ static BAR_VIEWS: Mutex<Vec<WeakEntity<BarView>>> = Mutex::new(Vec::new());
 /// Flag to ensure only one refresh task runs globally
 static REFRESH_TASK_STARTED: AtomicBool = AtomicBool::new(false);
 
-/// Information about the notch for rendering a gap
-#[derive(Debug, Clone)]
-pub struct NotchInfo {
-    /// Width of the left area (before notch)
-    pub left_width: f64,
-    /// Width of the right area (after notch)
-    pub right_width: f64,
-    /// Width of the notch itself
-    pub notch_width: f64,
-    /// Whether this is a fake notch (vs hardware notch)
-    pub is_fake: bool,
-    /// Color for fake notch (None = transparent for real notch)
-    pub fake_color: Option<Rgba>,
-    /// Corner radius for fake notch
-    pub corner_radius: f64,
-}
-
-/// Zone within a bar window
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Zone {
-    /// Outer edge (left edge for left window, right edge for right window)
-    Outer,
-    /// Inner edge (toward notch/center)
-    Inner,
-}
-
 /// The main menu bar view rendered with GPUI.
 pub struct BarView {
     config: SharedConfig,
     config_watcher: Option<ConfigWatcher>,
     config_version: u64,
     theme: Theme,
-    /// Notch info for rendering gap (None = no notch, full width)
-    notch_info: Option<NotchInfo>,
     /// Left side outer modules (far left edge)
     left_outer_modules: Vec<PositionedModule>,
-    /// Left side inner modules (toward notch/center)
+    /// Left side inner modules (toward center)
     left_inner_modules: Vec<PositionedModule>,
-    /// Right side outer modules (toward notch/center)
+    /// Right side outer modules (toward center)
     right_outer_modules: Vec<PositionedModule>,
     /// Right side inner modules (far right edge)
     right_inner_modules: Vec<PositionedModule>,
@@ -75,10 +47,6 @@ pub struct BarView {
 
 impl BarView {
     pub fn new() -> Self {
-        Self::new_with_notch(None)
-    }
-
-    pub fn new_with_notch(notch_info: Option<NotchInfo>) -> Self {
         let config = load_config();
         let theme = Theme::from_config(&config.bar);
         let (left_outer, left_inner, right_outer, right_inner) = Self::build_modules(&config);
@@ -95,7 +63,6 @@ impl BarView {
             config_watcher,
             config_version: 0,
             theme,
-            notch_info,
             left_outer_modules: left_outer,
             left_inner_modules: left_inner,
             right_outer_modules: right_outer,
@@ -450,147 +417,55 @@ impl Render for BarView {
             .map(|pm| self.render_module(pm))
             .collect();
 
-        // Single full-width bar with optional notch gap
-        if let Some(ref notch) = self.notch_info {
-            // Notched display: left section | notch gap | right section
-            // Build the notch gap element (transparent for real notch, colored for fake)
-            let mut notch_gap = div().w(px(notch.notch_width as f32)).h_full();
-
-            if let Some(color) = notch.fake_color {
-                // Fake notch: render with configured color and rounded bottom corners
-                notch_gap = notch_gap
-                    .bg(color)
-                    .rounded_bl(px(notch.corner_radius as f32))
-                    .rounded_br(px(notch.corner_radius as f32));
-            }
-            // Real notch: leave transparent (no bg set)
-
-            div()
-                .id("bar-root")
-                .flex()
-                .flex_row()
-                .items_center()
-                .w_full()
-                .h_full()
-                .child(
-                    // Left section: outer (left edge) | spacer | inner (toward notch)
-                    div()
-                        .flex()
-                        .flex_row()
-                        .items_center()
-                        .h_full()
-                        .w(px(notch.left_width as f32))
-                        .bg(bg_color)
-                        .px(px(8.0))
-                        .child(
-                            // Outer modules (left-aligned)
-                            div()
-                                .flex()
-                                .flex_row()
-                                .items_center()
-                                .gap(px(4.0))
-                                .children(left_outer_elements),
-                        )
-                        .child(
-                            // Flexible spacer
-                            div().flex_grow(),
-                        )
-                        .child(
-                            // Inner modules (right-aligned, toward notch)
-                            div()
-                                .flex()
-                                .flex_row()
-                                .items_center()
-                                .gap(px(4.0))
-                                .children(left_inner_elements),
-                        ),
-                )
-                .child(notch_gap)
-                .child(
-                    // Right section: outer (toward notch) | spacer | inner (right edge)
-                    div()
-                        .flex()
-                        .flex_row()
-                        .items_center()
-                        .h_full()
-                        .w(px(notch.right_width as f32))
-                        .bg(bg_color)
-                        .px(px(8.0))
-                        .child(
-                            // Outer modules (left-aligned, toward notch)
-                            div()
-                                .flex()
-                                .flex_row()
-                                .items_center()
-                                .gap(px(4.0))
-                                .children(right_outer_elements),
-                        )
-                        .child(
-                            // Flexible spacer
-                            div().flex_grow(),
-                        )
-                        .child(
-                            // Inner modules (right-aligned)
-                            div()
-                                .flex()
-                                .flex_row()
-                                .items_center()
-                                .gap(px(4.0))
-                                .children(right_inner_elements),
-                        ),
-                )
-        } else {
-            // Non-notched display: full-width bar
-            // Layout: left_outer | left_inner | spacer | right_outer | right_inner
-            div()
-                .id("bar-root-full")
-                .flex()
-                .flex_row()
-                .items_center()
-                .w_full()
-                .h_full()
-                .bg(bg_color)
-                .px(px(8.0))
-                .child(
-                    // Left outer modules (far left)
-                    div()
-                        .flex()
-                        .flex_row()
-                        .items_center()
-                        .gap(px(4.0))
-                        .children(left_outer_elements),
-                )
-                .child(
-                    // Left inner modules (toward center)
-                    div()
-                        .flex()
-                        .flex_row()
-                        .items_center()
-                        .gap(px(4.0))
-                        .children(left_inner_elements),
-                )
-                .child(
-                    // Flexible spacer
-                    div().flex_grow(),
-                )
-                .child(
-                    // Right outer modules (toward center)
-                    div()
-                        .flex()
-                        .flex_row()
-                        .items_center()
-                        .gap(px(4.0))
-                        .children(right_outer_elements),
-                )
-                .child(
-                    // Right inner modules (far right)
-                    div()
-                        .flex()
-                        .flex_row()
-                        .items_center()
-                        .gap(px(4.0))
-                        .children(right_inner_elements),
-                )
-        }
+        // Full-width bar layout: left_outer | left_inner | spacer | right_outer | right_inner
+        div()
+            .id("bar-root")
+            .flex()
+            .flex_row()
+            .items_center()
+            .w_full()
+            .h_full()
+            .bg(bg_color)
+            .px(px(8.0))
+            .child(
+                // Left outer modules (far left)
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(4.0))
+                    .children(left_outer_elements),
+            )
+            .child(
+                // Left inner modules (toward center)
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(4.0))
+                    .children(left_inner_elements),
+            )
+            .child(
+                // Flexible spacer
+                div().flex_grow(),
+            )
+            .child(
+                // Right outer modules (toward center)
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(4.0))
+                    .children(right_outer_elements),
+            )
+            .child(
+                // Right inner modules (far right)
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(4.0))
+                    .children(right_inner_elements),
+            )
     }
 }

@@ -230,9 +230,6 @@ impl BarConfig {
             validate_color(color, &format!("{}.popup_text_color", path), issues);
         }
 
-        // Validate notch config
-        validate_color(&self.notch.color, &format!("{}.notch.color", path), issues);
-
         // Validate numeric ranges
         if self.font_size <= 0.0 {
             issues.push(ConfigIssue {
@@ -498,9 +495,6 @@ pub struct BarConfig {
     /// Border corner radius (for connected popup effect)
     #[serde(default)]
     pub border_radius: f64,
-    /// Notch configuration
-    #[serde(default)]
-    pub notch: NotchConfig,
     /// Popup/panel background color (defaults to bar background_color)
     pub popup_background_color: Option<String>,
     /// Popup/panel text color (defaults to bar text_color)
@@ -531,7 +525,6 @@ impl Default for BarConfig {
             border_color: None,
             border_width: default_bar_border_width(),
             border_radius: 0.0,
-            notch: NotchConfig::default(),
             popup_background_color: None,
             popup_text_color: None,
             theme: ThemeConfig::default(),
@@ -550,46 +543,6 @@ fn default_hover_effects() -> bool {
 
 fn default_bar_border_width() -> f64 {
     1.0
-}
-
-/// Configuration for the fake notch on external displays
-#[derive(Debug, Deserialize, Clone)]
-pub struct NotchConfig {
-    /// Enable fake notch on displays without a real notch
-    #[serde(default)]
-    pub fake: bool,
-    /// Width of the fake notch in pixels
-    #[serde(default = "default_notch_width")]
-    pub width: f64,
-    /// Color of the fake notch (#RRGGBB or #RRGGBBAA)
-    #[serde(default = "default_notch_color")]
-    pub color: String,
-    /// Corner radius for the bottom corners of the fake notch
-    #[serde(default = "default_notch_corner_radius")]
-    pub corner_radius: f64,
-}
-
-impl Default for NotchConfig {
-    fn default() -> Self {
-        Self {
-            fake: false,
-            width: default_notch_width(),
-            color: default_notch_color(),
-            corner_radius: default_notch_corner_radius(),
-        }
-    }
-}
-
-fn default_notch_width() -> f64 {
-    200.0
-}
-
-fn default_notch_color() -> String {
-    "#000000".to_string()
-}
-
-fn default_notch_corner_radius() -> f64 {
-    8.0
 }
 
 /// Theme configuration for semantic colors

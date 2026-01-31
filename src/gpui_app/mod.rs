@@ -20,7 +20,7 @@ use gpui::{
 };
 use objc2::MainThreadMarker;
 
-pub use bar::{BarView, NotchInfo};
+pub use bar::BarView;
 
 use crate::config::load_config;
 use crate::window::get_main_screen_info;
@@ -78,11 +78,10 @@ pub fn run() {
         let macos_y = screen_y + screen_height - bar_height;
 
         log::info!(
-            "Creating GPUI menu bar: screen={}x{}, bar_height={}, has_notch={}, macos_y={}",
+            "Creating GPUI menu bar: screen={}x{}, bar_height={}, macos_y={}",
             screen_width,
             screen_height,
             bar_height,
-            screen_info.has_notch,
             macos_y
         );
 
@@ -90,66 +89,7 @@ pub fn run() {
         // so initial state is correct
         camera::start_monitoring();
 
-        // Always create a single full-width window for synchronized updates
-        // For notched displays, we render with a transparent gap in the middle
-        // For external displays, optionally render a fake notch
-        let notch_info = if screen_info.has_notch {
-            // Hardware notch - transparent gap
-            Some(NotchInfo {
-                left_width: screen_info.left_area_width,
-                right_width: screen_info.right_area_width,
-                notch_width: screen_width
-                    - screen_info.left_area_width
-                    - screen_info.right_area_width,
-                is_fake: false,
-                fake_color: None,
-                corner_radius: 0.0,
-            })
-        } else if config.bar.notch.fake {
-            // Fake notch enabled - colored gap
-            let notch_width = config.bar.notch.width;
-            let left_width = (screen_width - notch_width) / 2.0;
-            let right_width = screen_width - notch_width - left_width;
-            let fake_color =
-                crate::config::parse_hex_color(&config.bar.notch.color).map(|(r, g, b, a)| {
-                    gpui::Rgba {
-                        r: r as f32,
-                        g: g as f32,
-                        b: b as f32,
-                        a: a as f32,
-                    }
-                });
-
-            log::info!(
-                "Fake notch enabled: width={}, color={}, left_width={}, right_width={}",
-                notch_width,
-                config.bar.notch.color,
-                left_width,
-                right_width
-            );
-
-            Some(NotchInfo {
-                left_width,
-                right_width,
-                notch_width,
-                is_fake: true,
-                fake_color,
-                corner_radius: config.bar.notch.corner_radius,
-            })
-        } else {
-            // No notch - full width bar
-            None
-        };
-
-        create_bar_window(
-            cx,
-            mtm,
-            screen_x,
-            macos_y,
-            screen_width,
-            bar_height,
-            notch_info,
-        );
+        create_bar_window(cx, mtm, screen_x, macos_y, screen_width, bar_height);
 
         // Create the demo panel window (hidden by default)
         // Full-width panel extends directly from the bar with no gap
@@ -388,27 +328,18 @@ fn create_bar_window(
     macos_y: f64,
     width: f64,
     height: f64,
-    notch_info: Option<NotchInfo>,
 ) {
-    // Create bounds for GPUI (uses top-left origin, y=0 is top)
-    // We'll reposition with NSWindow afterwards
     let bounds = Bounds {
-        origin: point(px(x as f32), px(0.0)), // y=0 for GPUI (top)
+        origin: point(px(x as f32), px(0.0)),
         size: size(px(width as f32), px(height as f32)),
     };
 
-    // For notched displays, make window transparent to show notch
-    // Check this before moving notch_info into the closure
-    let transparent = notch_info.is_some();
-
     log::info!(
-        "Creating bar window: GPUI bounds ({}, 0) size {}x{}, will set macOS frame to ({}, {}), notch={:?}",
-        x,
+        "Creating bar window: size {}x{} at ({}, {})",
         width,
         height,
         x,
-        macos_y,
-        notch_info
+        macos_y
     );
 
     let window = cx
@@ -422,27 +353,19 @@ fn create_bar_window(
                 show: true,
                 ..Default::default()
             },
-            |_window, cx| cx.new(|_cx| BarView::new_with_notch(notch_info)),
+            |_window, cx| cx.new(|_cx| BarView::new()),
         )
         .expect("Failed to create bar window");
 
-    // Set window level and position using NSWindow directly
     window
         .update(cx, |_, _window, _cx| {
-            configure_bar_window(mtm, x, macos_y, width, height, transparent);
+            configure_bar_window(mtm, x, macos_y, width, height);
         })
         .ok();
 }
 
 /// Configure the NSWindow for menu bar appearance
-fn configure_bar_window(
-    mtm: MainThreadMarker,
-    x: f64,
-    macos_y: f64,
-    width: f64,
-    height: f64,
-    transparent: bool,
-) {
+fn configure_bar_window(mtm: MainThreadMarker, x: f64, macos_y: f64, width: f64, height: f64) {
     use objc2_app_kit::{NSApplication, NSWindowStyleMask};
     use objc2_foundation::NSRect;
 
@@ -457,44 +380,29 @@ fn configure_bar_window(
 
             // Match by approximate size (height ~32)
             if frame.size.height <= 40.0 && frame.size.height > 20.0 {
-                // Make it borderless first
                 ns_window.setStyleMask(NSWindowStyleMask::Borderless);
 
-                // Set frame to exact position (macOS coordinates: bottom-left origin)
                 let new_frame = NSRect::new(
                     objc2_foundation::NSPoint::new(x, macos_y),
                     objc2_foundation::NSSize::new(width, height),
                 );
                 ns_window.setFrame_display(new_frame, true);
 
-                // Set window level
                 let _: () = objc2::msg_send![&ns_window, setLevel: MENU_BAR_WINDOW_LEVEL];
 
-                // Remove shadow for cleaner look
                 ns_window.setHasShadow(false);
-
-                // For notched displays, make window transparent so notch area shows through
-                if transparent {
-                    ns_window.setOpaque(false);
-                    ns_window.setBackgroundColor(None);
-                } else {
-                    ns_window.setOpaque(true);
-                }
-
-                // Prevent activation but accept mouse moved events for hover tracking
+                ns_window.setOpaque(true);
                 ns_window.setIgnoresMouseEvents(false);
                 ns_window.setAcceptsMouseMovedEvents(true);
 
                 log::info!(
-                    "Configured window: frame=({}, {}) {}x{}, level={}, transparent={}",
+                    "Configured bar window: frame=({}, {}) {}x{}",
                     x,
                     macos_y,
                     width,
-                    height,
-                    MENU_BAR_WINDOW_LEVEL,
-                    transparent
+                    height
                 );
-                return; // Only configure one window per call
+                return;
             }
         }
     }

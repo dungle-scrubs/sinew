@@ -18,9 +18,11 @@ static DEMO_PANEL_VISIBLE: AtomicBool = AtomicBool::new(false);
 /// Global visibility state for the calendar popup.
 static CALENDAR_POPUP_VISIBLE: AtomicBool = AtomicBool::new(false);
 
-// Thread-local storage for the event monitor (only accessed from main thread).
+// Thread-local storage for the event monitors (only accessed from main thread).
 thread_local! {
     static EVENT_MONITOR: RefCell<Option<Retained<AnyObject>>> = const { RefCell::new(None) };
+    static CURSOR_MONITOR: RefCell<Option<Retained<AnyObject>>> = const { RefCell::new(None) };
+    static SCROLL_MONITOR: RefCell<Option<Retained<AnyObject>>> = const { RefCell::new(None) };
 }
 
 /// Panel window height - used to identify the panel window.
@@ -310,6 +312,91 @@ fn remove_global_click_monitor() {
     });
 }
 
+/// Starts a local mouse move monitor to force arrow cursor over popups.
+/// Local monitors intercept events directed to our application's windows.
+fn start_cursor_monitor(_mtm: MainThreadMarker) {
+    let already_active = CURSOR_MONITOR.with(|cell| cell.borrow().is_some());
+    if already_active {
+        return;
+    }
+
+    use objc2_app_kit::NSCursor;
+
+    let handler = RcBlock::new(|event: NonNull<NSEvent>| -> *mut NSEvent {
+        // Force arrow cursor while any popup is visible
+        if CALENDAR_POPUP_VISIBLE.load(Ordering::SeqCst)
+            || DEMO_PANEL_VISIBLE.load(Ordering::SeqCst)
+        {
+            NSCursor::arrowCursor().set();
+        }
+        event.as_ptr() as *mut NSEvent // Pass through the event unchanged
+    });
+
+    let mask = NSEventMask::MouseMoved;
+    // Use LOCAL monitor to intercept events directed to our windows
+    let monitor: Option<Retained<AnyObject>> =
+        unsafe { NSEvent::addLocalMonitorForEventsMatchingMask_handler(mask, &handler) };
+
+    if let Some(mon) = monitor {
+        log::info!("Local cursor monitor started");
+        CURSOR_MONITOR.with(|cell| {
+            *cell.borrow_mut() = Some(mon);
+        });
+    }
+}
+
+/// Stops the cursor monitor.
+fn stop_cursor_monitor() {
+    CURSOR_MONITOR.with(|cell| {
+        if let Some(monitor) = cell.borrow_mut().take() {
+            log::info!("Removing cursor monitor");
+            unsafe {
+                NSEvent::removeMonitor(&monitor);
+            }
+        }
+    });
+}
+
+/// Starts a global scroll wheel monitor.
+/// This captures scroll events even when over other windows.
+fn start_scroll_monitor(_mtm: MainThreadMarker) {
+    let already_active = SCROLL_MONITOR.with(|cell| cell.borrow().is_some());
+    if already_active {
+        return;
+    }
+
+    // Use GLOBAL monitor to see all scroll events
+    let handler = RcBlock::new(|event: NonNull<NSEvent>| {
+        let event_ref: &NSEvent = unsafe { event.as_ref() };
+        let delta_x = event_ref.scrollingDeltaX();
+        let delta_y = event_ref.scrollingDeltaY();
+        log::info!("GLOBAL Scroll: dx={:.1}, dy={:.1}", delta_x, delta_y);
+    });
+
+    let mask = NSEventMask::ScrollWheel;
+    let monitor: Option<Retained<AnyObject>> =
+        NSEvent::addGlobalMonitorForEventsMatchingMask_handler(mask, &handler);
+
+    if let Some(mon) = monitor {
+        log::info!("Global scroll monitor started");
+        SCROLL_MONITOR.with(|cell| {
+            *cell.borrow_mut() = Some(mon);
+        });
+    }
+}
+
+/// Stops the scroll monitor.
+fn stop_scroll_monitor() {
+    SCROLL_MONITOR.with(|cell| {
+        if let Some(monitor) = cell.borrow_mut().take() {
+            log::info!("Removing scroll monitor");
+            unsafe {
+                NSEvent::removeMonitor(&monitor);
+            }
+        }
+    });
+}
+
 /// Handles a global click event. If the click is outside popup windows, hides all popups.
 fn handle_global_click(event: &NSEvent) {
     // Get click location in screen coordinates
@@ -386,16 +473,30 @@ fn toggle_calendar_window(visible: bool) {
     let app = NSApplication::sharedApplication(mtm);
     let windows = app.windows();
 
+    log::debug!(
+        "toggle_calendar_window: visible={}, checking {} windows",
+        visible,
+        windows.len()
+    );
+
     // Find the calendar window by its size (smaller than panel but bigger than bar)
+    // Calendar: ~280x520, Panel: ~1512x712, Bar: ~1512x32
     for i in 0..windows.len() {
         let ns_window = windows.objectAtIndex(i);
         let frame = ns_window.frame();
 
-        // Match calendar by approximate size
-        let is_calendar = frame.size.width > 250.0
-            && frame.size.width < 350.0
-            && frame.size.height > 250.0
-            && frame.size.height < 400.0;
+        log::trace!(
+            "Window {}: size {}x{}, alpha={}",
+            i,
+            frame.size.width,
+            frame.size.height,
+            ns_window.alphaValue()
+        );
+
+        // Match calendar by width (only window with width < 500)
+        // This is more reliable than height since panel and bar are full-width
+        let is_calendar =
+            frame.size.width > 200.0 && frame.size.width < 500.0 && frame.size.height > 200.0;
 
         if is_calendar {
             log::debug!(
@@ -411,21 +512,64 @@ fn toggle_calendar_window(visible: bool) {
                     let _: () = objc2::msg_send![&ns_window, setLevel: 3_i64];
                 }
                 ns_window.setAlphaValue(1.0);
+                ns_window.setOpaque(true);
+                ns_window.setAcceptsMouseMovedEvents(true);
                 ns_window.makeKeyAndOrderFront(None);
 
-                // Start monitoring for outside clicks
+                // Add tracking area with NSTrackingActiveAlways to handle cursor
+                // regardless of key window status
+                unsafe {
+                    use objc2::AllocAnyThread;
+                    use objc2_app_kit::{NSCursor, NSTrackingArea, NSTrackingAreaOptions};
+
+                    if let Some(content_view) = ns_window.contentView() {
+                        // Remove existing tracking areas
+                        let existing_areas = content_view.trackingAreas();
+                        for i in 0..existing_areas.len() {
+                            let area = existing_areas.objectAtIndex(i);
+                            content_view.removeTrackingArea(&area);
+                        }
+
+                        // Create tracking area with NSTrackingActiveAlways
+                        let bounds = content_view.bounds();
+                        let options = NSTrackingAreaOptions::MouseMoved
+                            | NSTrackingAreaOptions::ActiveAlways
+                            | NSTrackingAreaOptions::CursorUpdate;
+
+                        let tracking_area = NSTrackingArea::initWithRect_options_owner_userInfo(
+                            NSTrackingArea::alloc(),
+                            bounds,
+                            options,
+                            Some(&content_view),
+                            None,
+                        );
+
+                        content_view.addTrackingArea(&tracking_area);
+
+                        // Set initial cursor
+                        NSCursor::arrowCursor().set();
+                    }
+                }
+
+                // Start monitoring for outside clicks, cursor, and scroll
                 start_global_click_monitor(mtm);
+                start_cursor_monitor(mtm);
+                start_scroll_monitor(mtm);
 
                 log::info!("Calendar popup shown");
             } else {
                 unsafe {
                     let _: () = objc2::msg_send![&ns_window, setLevel: -20_i64];
+                    // Re-enable cursor rects
+                    let _: () = objc2::msg_send![&ns_window, enableCursorRects];
                 }
                 ns_window.setAlphaValue(0.0);
 
-                // Remove click monitor if no popups are visible
+                // Remove monitors if no popups are visible
                 if !DEMO_PANEL_VISIBLE.load(Ordering::SeqCst) {
                     remove_global_click_monitor();
+                    stop_cursor_monitor();
+                    stop_scroll_monitor();
                 }
 
                 log::info!("Calendar popup hidden");
@@ -453,10 +597,9 @@ fn reposition_calendar_window(trigger_x: f64, trigger_width: f64, align: PopupAl
         let ns_window = windows.objectAtIndex(i);
         let frame = ns_window.frame();
 
-        let is_calendar = frame.size.width > 250.0
-            && frame.size.width < 350.0
-            && frame.size.height > 250.0
-            && frame.size.height < 400.0;
+        // Match calendar by width (only window with width < 500)
+        let is_calendar =
+            frame.size.width > 200.0 && frame.size.width < 500.0 && frame.size.height > 200.0;
 
         if is_calendar {
             let popup_width = frame.size.width;

@@ -136,7 +136,9 @@ pub fn run() {
         // Create the calendar popup window (hidden by default)
         // Position it under the right bar area where the calendar button is
         let calendar_width = 280.0;
-        let calendar_height = 320.0;
+        let calendar_max_height = (screen_height - bar_height) * 0.85; // Max 85% of available space
+        let calendar_content_height = modules::CalendarView::content_height() as f64;
+        let calendar_height = calendar_content_height.min(calendar_max_height); // Use content height, capped at max
         let calendar_x = screen_x + screen_width - calendar_width - 80.0; // Offset from right edge, under date module
 
         create_calendar_window(
@@ -302,17 +304,26 @@ fn configure_calendar_window(mtm: MainThreadMarker, x: f64, bar_y: f64, width: f
         let app = NSApplication::sharedApplication(mtm);
         let windows = app.windows();
 
-        // Find the calendar window by its approximate size
+        log::debug!(
+            "configure_calendar_window: checking {} windows for calendar",
+            windows.len()
+        );
+
+        // Find the calendar window by its width (only window with width < 500)
+        // Calendar: ~280x520, Panel: ~1512x712, Bar: ~1512x32
         for i in (0..windows.len()).rev() {
             let ns_window = windows.objectAtIndex(i);
             let frame = ns_window.frame();
 
-            // Match by approximate calendar size
-            if frame.size.width > 250.0
-                && frame.size.width < 350.0
-                && frame.size.height > 250.0
-                && frame.size.height < 400.0
-            {
+            log::trace!(
+                "Window {}: size {}x{}",
+                i,
+                frame.size.width,
+                frame.size.height
+            );
+
+            // Match calendar by width (only popup window with width < 500)
+            if frame.size.width > 200.0 && frame.size.width < 500.0 && frame.size.height > 200.0 {
                 ns_window.setStyleMask(NSWindowStyleMask::Borderless);
 
                 let new_frame = NSRect::new(

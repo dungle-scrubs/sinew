@@ -381,6 +381,7 @@ impl Render for PanelView {
             .id(ElementId::Name("panel-content".into()))
             .w_full()
             .h_full()
+            .cursor_default() // Ensure popup controls cursor, not app below
             .bg(self.theme.background)
             .overflow_y_scroll() // Enable vertical scrolling
             .child(self.render_demo_content())

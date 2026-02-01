@@ -120,7 +120,8 @@ impl CalendarModule {
     }
 
     fn set_offset(&mut self, minutes: i32) {
-        self.offset_minutes = minutes.clamp(-MAX_TIME_OFFSET_MINUTES, MAX_TIME_OFFSET_MINUTES);
+        let snapped = Self::snap_offset_to_clock_boundary(minutes);
+        self.offset_minutes = snapped.clamp(-MAX_TIME_OFFSET_MINUTES, MAX_TIME_OFFSET_MINUTES);
     }
 
     /// Resets the time offset and scrolls to today.
@@ -745,6 +746,22 @@ impl GpuiModule for CalendarModule {
                 }
             }
             PopupEvent::Closed => {}
+            PopupEvent::Scroll { delta_x, delta_y } => {
+                if delta_x.abs() <= delta_y.abs() {
+                    return;
+                }
+                const STEP_PX: f32 = 8.0;
+                self.scroll_accumulator += delta_x;
+                let steps = (self.scroll_accumulator / STEP_PX).trunc() as i32;
+                if steps == 0 {
+                    return;
+                }
+                self.scroll_accumulator -= (steps as f32) * STEP_PX;
+                let delta_minutes = steps * 15;
+                let snapped =
+                    Self::snap_offset_to_clock_boundary(self.offset_minutes + delta_minutes);
+                self.set_offset(snapped);
+            }
             _ => {}
         }
     }

@@ -11,13 +11,23 @@ use objc2_app_kit::{NSApplication, NSEvent, NSEventMask};
 use std::cell::RefCell;
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::RwLock;
 
 /// Global visibility state for the panel.
 static PANEL_VISIBLE: AtomicBool = AtomicBool::new(false);
 
-/// Panel content type (0 = demo, 1 = news)
-/// Initialize to NEWS so panel doesn't render demo content on creation
-static PANEL_CONTENT_TYPE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(1);
+/// Panel content state (content_id and height)
+static PANEL_STATE: RwLock<PanelState> = RwLock::new(PanelState {
+    content_id: String::new(),
+    height: 280.0,
+});
+
+/// Panel state for content switching.
+#[derive(Clone)]
+pub struct PanelState {
+    pub content_id: String,
+    pub height: f64,
+}
 
 /// Global visibility state for the calendar popup.
 static CALENDAR_POPUP_VISIBLE: AtomicBool = AtomicBool::new(false);
@@ -36,20 +46,39 @@ thread_local! {
 /// Panel window height - used to identify the panel window.
 const PANEL_HEIGHT_THRESHOLD: f64 = 100.0;
 
-/// Panel content types
+/// Legacy content type constants for compatibility
 pub const PANEL_CONTENT_DEMO: u8 = 0;
 pub const PANEL_CONTENT_NEWS: u8 = 1;
 
-/// Toggles the demo panel visibility.
-/// Returns the new visibility state.
-pub fn toggle_demo_panel() -> bool {
-    toggle_panel_with_content(PANEL_CONTENT_DEMO)
+/// Get the current panel content type (legacy - returns 0 for demo, 1 for news)
+pub fn get_panel_content_type() -> u8 {
+    if let Ok(state) = PANEL_STATE.read() {
+        match state.content_id.as_str() {
+            "news" => PANEL_CONTENT_NEWS,
+            _ => PANEL_CONTENT_DEMO,
+        }
+    } else {
+        PANEL_CONTENT_DEMO
+    }
 }
 
-/// Toggles the news panel visibility.
+/// Get the current panel content ID.
+pub fn get_panel_content_id() -> String {
+    PANEL_STATE
+        .read()
+        .map(|s| s.content_id.clone())
+        .unwrap_or_default()
+}
+
+/// Get the current panel height.
+pub fn get_panel_height() -> f64 {
+    PANEL_STATE.read().map(|s| s.height).unwrap_or(280.0)
+}
+
+/// Toggles the panel with specified content and height.
 /// Returns the new visibility state.
-pub fn toggle_news_panel() -> bool {
-    toggle_panel_with_content(PANEL_CONTENT_NEWS)
+pub fn toggle_panel(content_id: &str, height: f64) -> bool {
+    toggle_panel_with_content_and_height(content_id, height)
 }
 
 /// Registry of popup close functions for mutual exclusion.
@@ -62,7 +91,7 @@ static POPUP_CLOSERS: std::sync::Mutex<Vec<(&'static str, Box<dyn Fn() + Send>)>
 pub fn init() {
     register_popup("panel", || {
         if PANEL_VISIBLE.swap(false, Ordering::SeqCst) {
-            toggle_panel_window(false);
+            toggle_panel_window(false, 0.0);
         }
     });
     register_popup("calendar", || {
@@ -94,15 +123,15 @@ fn close_other_popups(except: &str) {
     }
 }
 
-/// Toggles the panel with specified content type.
-fn toggle_panel_with_content(content_type: u8) -> bool {
+/// Toggles the panel with specified content and height.
+fn toggle_panel_with_content_and_height(content_id: &str, height: f64) -> bool {
     let was_visible = PANEL_VISIBLE.load(Ordering::SeqCst);
-    let current_content = PANEL_CONTENT_TYPE.load(Ordering::SeqCst);
+    let current_content = get_panel_content_id();
 
     // If panel is visible with same content, just hide it
-    if was_visible && current_content == content_type {
+    if was_visible && current_content == content_id {
         PANEL_VISIBLE.store(false, Ordering::SeqCst);
-        toggle_panel_window(false);
+        toggle_panel_window(false, 0.0);
         log::info!("toggle_panel: hiding (same content)");
         return false;
     }
@@ -110,20 +139,22 @@ fn toggle_panel_with_content(content_type: u8) -> bool {
     // Close other popups before showing this one
     close_other_popups("panel");
 
-    // If panel is visible with different content, or was hidden, show with new content
-    // Always set content type FIRST, then do hide/show cycle to force GPUI re-render
-    PANEL_CONTENT_TYPE.store(content_type, Ordering::SeqCst);
+    // Set content state - PanelView polls this via timer and will re-render
+    if let Ok(mut state) = PANEL_STATE.write() {
+        state.content_id = content_id.to_string();
+        state.height = height;
+    }
     PANEL_VISIBLE.store(true, Ordering::SeqCst);
 
     log::info!(
-        "toggle_panel: showing content={} (was_visible={}, prev_content={})",
-        content_type,
+        "toggle_panel: showing content='{}' height={} (was_visible={}, prev_content='{}')",
+        content_id,
+        height,
         was_visible,
         current_content
     );
 
-    // Show the panel (content type already set)
-    toggle_panel_window(true);
+    toggle_panel_window(true, height);
     true
 }
 
@@ -132,28 +163,27 @@ pub fn is_panel_visible() -> bool {
     PANEL_VISIBLE.load(Ordering::SeqCst)
 }
 
-/// Returns the current panel content type.
-pub fn get_panel_content_type() -> u8 {
-    PANEL_CONTENT_TYPE.load(Ordering::SeqCst)
-}
-
-/// Shows the demo panel.
+/// Shows the demo panel (legacy).
 pub fn show_demo_panel() {
-    PANEL_CONTENT_TYPE.store(PANEL_CONTENT_DEMO, Ordering::SeqCst);
+    if let Ok(mut state) = PANEL_STATE.write() {
+        state.content_id = "demo".to_string();
+        state.height = 500.0;
+    }
     if !PANEL_VISIBLE.swap(true, Ordering::SeqCst) {
-        toggle_panel_window(true);
+        toggle_panel_window(true, 500.0);
     }
 }
 
 /// Hides the panel.
 pub fn hide_panel() {
     if PANEL_VISIBLE.swap(false, Ordering::SeqCst) {
-        toggle_panel_window(false);
+        toggle_panel_window(false, 0.0);
     }
 }
 
 /// Toggles the panel NSWindow visibility using AppKit.
-fn toggle_panel_window(visible: bool) {
+/// When showing, resizes the panel to the specified height.
+fn toggle_panel_window(visible: bool, height: f64) {
     let Some(mtm) = MainThreadMarker::new() else {
         log::error!("toggle_panel_window: not on main thread");
         return;
@@ -200,15 +230,6 @@ fn toggle_panel_window(visible: bool) {
                     let _: () = objc2::msg_send![&ns_window, setLevel: 3_i64];
                 }
                 ns_window.setAlphaValue(1.0);
-
-                // Force GPUI to redraw by slightly resizing the window
-                // GPUI doesn't respond to setNeedsDisplay since it uses its own Metal renderer
-                let mut new_frame = frame;
-                new_frame.size.height += 1.0;
-                ns_window.setFrame_display(new_frame, true);
-                new_frame.size.height -= 1.0;
-                ns_window.setFrame_display(new_frame, true);
-
                 ns_window.makeKeyAndOrderFront(None);
 
                 // Start monitoring for outside clicks
@@ -252,7 +273,7 @@ fn toggle_panel_window(visible: bool) {
 /// Call this from the window creation code.
 pub fn hide_panel_on_create() {
     PANEL_VISIBLE.store(false, Ordering::SeqCst);
-    toggle_panel_window(false);
+    toggle_panel_window(false, 0.0);
 }
 
 // ============================================================================

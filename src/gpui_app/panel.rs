@@ -1,19 +1,71 @@
 //! Panel view for full-screen overlays.
 
+use std::time::Duration;
+
 use gpui::{div, prelude::*, px, ElementId, ParentElement, Rgba, SharedString, Styled, Window};
 
 use crate::gpui_app::modules::{get_global_news_data, Release};
-use crate::gpui_app::popup_manager::{get_panel_content_type, PANEL_CONTENT_NEWS};
+use crate::gpui_app::popup_manager::{get_panel_content_id, get_panel_height};
 use crate::gpui_app::theme::Theme;
 
 /// Panel view that shows component demos and other full-screen content.
 pub struct PanelView {
     theme: Theme,
+    /// Cached content ID - updated via timer polling
+    content_id: String,
+    /// Cached height - updated via timer polling
+    height: f64,
 }
 
 impl PanelView {
-    pub fn new(theme: Theme) -> Self {
-        Self { theme }
+    pub fn new(theme: Theme, cx: &mut Context<Self>) -> Self {
+        let initial_content = get_panel_content_id();
+        let initial_height = get_panel_height();
+
+        // Set up a timer to poll for content/height changes
+        cx.spawn(async move |this, cx| {
+            loop {
+                // Check every 50ms for changes
+                cx.background_executor()
+                    .timer(Duration::from_millis(50))
+                    .await;
+
+                let should_notify = this
+                    .update(cx, |view, _cx| {
+                        let current_id = get_panel_content_id();
+                        let current_height = get_panel_height();
+                        let changed =
+                            view.content_id != current_id || view.height != current_height;
+                        if changed {
+                            log::info!(
+                                "Panel state changed: '{}' h={} -> '{}' h={}",
+                                view.content_id,
+                                view.height,
+                                current_id,
+                                current_height
+                            );
+                            view.content_id = current_id;
+                            view.height = current_height;
+                        }
+                        changed
+                    })
+                    .ok()
+                    .unwrap_or(false);
+
+                if should_notify {
+                    let _ = this.update(cx, |_view, cx| {
+                        cx.notify();
+                    });
+                }
+            }
+        })
+        .detach();
+
+        Self {
+            theme,
+            content_id: initial_content,
+            height: initial_height,
+        }
     }
 
     fn render_demo_content(&self) -> gpui::Div {
@@ -491,20 +543,47 @@ impl PanelView {
 }
 
 impl Render for PanelView {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        let content_type = get_panel_content_type();
-        log::debug!("Panel render: content_type={}", content_type);
+    fn render(&mut self, window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        let content_id = &self.content_id;
+        let height = self.height;
+        log::debug!(
+            "Panel render: content_id='{}', height={}",
+            content_id,
+            height
+        );
 
-        let content = if content_type == PANEL_CONTENT_NEWS {
-            log::info!("Panel rendering NEWS content");
-            self.render_news_content()
-        } else {
-            log::debug!("Panel rendering demo content");
-            self.render_demo_content()
+        // Resize window to match desired height
+        let current_bounds = window.bounds();
+        let desired_height = px(height as f32);
+        let current_height: f32 = current_bounds.size.height.into();
+        let desired_height_f32: f32 = desired_height.into();
+        if (current_height - desired_height_f32).abs() > 1.0 {
+            log::info!(
+                "Panel resizing: {} -> {}",
+                current_height,
+                desired_height_f32
+            );
+            window.resize(gpui::Size {
+                width: current_bounds.size.width,
+                height: desired_height,
+            });
+        }
+
+        let content = match content_id.as_str() {
+            "news" => {
+                log::info!("Panel rendering NEWS content");
+                self.render_news_content()
+            }
+            "demo" | _ => {
+                log::info!("Panel rendering DEMO content");
+                self.render_demo_content()
+            }
         };
 
+        // Include content_id in ID to force GPUI to re-render when content changes
+        let panel_id = format!("panel-content-{}", content_id);
         div()
-            .id(ElementId::Name("panel-content".into()))
+            .id(ElementId::Name(panel_id.into()))
             .w_full()
             .h_full()
             .cursor_default()

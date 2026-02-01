@@ -300,13 +300,18 @@ impl BarView {
         if let Some(ref popup_cfg) = pm.popup {
             let popup_type = popup_cfg.popup_type.clone();
             let popup_anchor = popup_cfg.anchor;
+            let popup_height = popup_cfg.height as f64;
             wrapper = wrapper.on_mouse_down(MouseButton::Left, move |_event, _window, _cx| {
-                log::info!("Module clicked, popup_type={:?}", popup_type);
+                log::info!(
+                    "Module clicked, popup_type={:?}, height={}",
+                    popup_type,
+                    popup_height
+                );
                 // Toggle popups based on type
-                if popup_type.as_deref() == Some("demo") {
-                    crate::gpui_app::popup_manager::toggle_demo_panel();
-                } else if popup_type.as_deref() == Some("news") {
-                    crate::gpui_app::popup_manager::toggle_news_panel();
+                if popup_type.as_deref() == Some("demo") || popup_type.as_deref() == Some("news") {
+                    // Use generic panel toggle with content_id and height
+                    let content_id = popup_type.as_deref().unwrap_or("demo");
+                    crate::gpui_app::popup_manager::toggle_panel(content_id, popup_height);
                 } else if popup_type.as_deref() == Some("calendar") {
                     // Get current mouse position for popup positioning
                     let mouse_pos = get_mouse_screen_position();

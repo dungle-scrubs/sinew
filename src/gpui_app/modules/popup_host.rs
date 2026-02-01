@@ -10,7 +10,7 @@ use gpui::{
     div, prelude::*, px, size, AnyElement, Context, ElementId, ParentElement, Styled, Window,
 };
 
-use super::{get_module, get_popup_spec, GpuiModule, PopupType};
+use super::{dispatch_popup_event, get_module, get_popup_spec, GpuiModule, PopupEvent, PopupType};
 use crate::gpui_app::theme::Theme;
 use std::io::Write;
 
@@ -310,6 +310,17 @@ impl Render for PopupHostView {
                     .border_b_1()
                     .overflow_y_scroll();
             }
+        }
+
+        if !self.module_id.is_empty() {
+            let module_id = self.module_id.clone();
+            container = container.on_scroll_wheel(move |event, _window, _cx| {
+                let (delta_x, delta_y) = match event.delta {
+                    gpui::ScrollDelta::Pixels(delta) => (f32::from(delta.x), f32::from(delta.y)),
+                    gpui::ScrollDelta::Lines(delta) => (delta.x * 16.0, delta.y * 16.0),
+                };
+                dispatch_popup_event(&module_id, PopupEvent::Scroll { delta_x, delta_y });
+            });
         }
 
         if let Some(ref spec) = spec {

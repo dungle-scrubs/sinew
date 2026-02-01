@@ -553,6 +553,14 @@ pub fn dispatch_popup_action(module_id: &str, action: PopupAction) {
     }
 }
 
+pub fn dispatch_popup_event(module_id: &str, event: PopupEvent) {
+    if let Some(module) = get_module(module_id) {
+        if let Ok(mut guard) = module.write() {
+            guard.on_popup_event(event);
+        }
+    }
+}
+
 /// Gets the popup spec for a module.
 pub fn get_popup_spec(id: &str) -> Option<PopupSpec> {
     get_module(id).and_then(|m| m.read().ok().and_then(|e| e.popup_spec()))

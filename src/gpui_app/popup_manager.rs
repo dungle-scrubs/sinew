@@ -475,7 +475,6 @@ pub fn reposition_popup_window(popup_type: PopupType, height: f64) {
 // Thread-local storage for event monitors.
 thread_local! {
     static EVENT_MONITOR: RefCell<Option<Retained<AnyObject>>> = const { RefCell::new(None) };
-    static CURSOR_MONITOR: RefCell<Option<Retained<AnyObject>>> = const { RefCell::new(None) };
     static WINDOW_OBSERVERS: RefCell<Vec<Retained<AnyObject>>> = const { RefCell::new(Vec::new()) };
     static CLICK_TS_MONITOR: RefCell<Option<Retained<AnyObject>>> = const { RefCell::new(None) };
 }
@@ -619,7 +618,6 @@ pub fn hide_popup() {
 
         // Remove monitors
         remove_global_click_monitor();
-        stop_cursor_monitor();
     }
 }
 
@@ -793,10 +791,7 @@ fn show_popup_window_appkit(popup_type: PopupType, height: f64) -> bool {
             ns_window.setBackgroundColor(Some(&bg_color));
 
             ns_window.setAcceptsMouseMovedEvents(true);
-            // Prefer a key window so GPUI receives pointer/scroll events.
-            unsafe {
-                let _: () = objc2::msg_send![&ns_window, makeKeyAndOrderFront: std::ptr::null::<AnyObject>()];
-            }
+            // Order front without activating the window.
             ns_window.orderFrontRegardless();
             trace_popup(&format!(
                 "show_popup_window_appkit visible={} alpha={:.2} key={} ignores_mouse={}",
@@ -812,12 +807,8 @@ fn show_popup_window_appkit(popup_type: PopupType, height: f64) -> bool {
             log_popup_window_state_later(popup_type, "after_show_150ms");
             mark_popup_window_shown(popup_type);
 
-            // Set up cursor tracking
-            setup_cursor_tracking(&ns_window);
-
             // Start monitors
             start_global_click_monitor(mtm);
-            start_cursor_monitor(mtm);
 
             log::info!(
                 "Popup window shown: type={:?}, width={}",
@@ -843,40 +834,6 @@ fn show_popup_window_appkit(popup_type: PopupType, height: f64) -> bool {
         show_start.elapsed()
     ));
     false
-}
-
-/// Sets up cursor tracking for a window.
-fn setup_cursor_tracking(ns_window: &objc2_app_kit::NSWindow) {
-    unsafe {
-        use objc2::AllocAnyThread;
-        use objc2_app_kit::{NSCursor, NSTrackingArea, NSTrackingAreaOptions};
-
-        if let Some(content_view) = ns_window.contentView() {
-            // Remove existing tracking areas
-            let existing_areas = content_view.trackingAreas();
-            for i in 0..existing_areas.len() {
-                let area = existing_areas.objectAtIndex(i);
-                content_view.removeTrackingArea(&area);
-            }
-
-            // Create tracking area with NSTrackingActiveAlways
-            let bounds = content_view.bounds();
-            let options = NSTrackingAreaOptions::MouseMoved
-                | NSTrackingAreaOptions::ActiveAlways
-                | NSTrackingAreaOptions::CursorUpdate;
-
-            let tracking_area = NSTrackingArea::initWithRect_options_owner_userInfo(
-                NSTrackingArea::alloc(),
-                bounds,
-                options,
-                Some(&content_view),
-                None,
-            );
-
-            content_view.addTrackingArea(&tracking_area);
-            NSCursor::arrowCursor().set();
-        }
-    }
 }
 
 /// Hides all popup windows.
@@ -1150,45 +1107,6 @@ fn remove_global_click_monitor() {
     EVENT_MONITOR.with(|cell| {
         if let Some(monitor) = cell.borrow_mut().take() {
             log::info!("Removing global click monitor");
-            unsafe {
-                NSEvent::removeMonitor(&monitor);
-            }
-        }
-    });
-}
-
-/// Starts the cursor monitor to force arrow cursor.
-fn start_cursor_monitor(_mtm: MainThreadMarker) {
-    let already_active = CURSOR_MONITOR.with(|cell| cell.borrow().is_some());
-    if already_active {
-        return;
-    }
-
-    use objc2_app_kit::NSCursor;
-
-    let handler = RcBlock::new(|event: NonNull<NSEvent>| -> *mut NSEvent {
-        if POPUP_VISIBLE.load(Ordering::SeqCst) {
-            NSCursor::arrowCursor().set();
-        }
-        event.as_ptr()
-    });
-
-    let mask = NSEventMask::MouseMoved;
-    let monitor: Option<Retained<AnyObject>> =
-        unsafe { NSEvent::addLocalMonitorForEventsMatchingMask_handler(mask, &handler) };
-
-    if let Some(mon) = monitor {
-        CURSOR_MONITOR.with(|cell| {
-            *cell.borrow_mut() = Some(mon);
-        });
-    }
-}
-
-/// Stops the cursor monitor.
-fn stop_cursor_monitor() {
-    CURSOR_MONITOR.with(|cell| {
-        if let Some(monitor) = cell.borrow_mut().take() {
-            log::info!("Removing cursor monitor");
             unsafe {
                 NSEvent::removeMonitor(&monitor);
             }

@@ -9,6 +9,8 @@ const KNOWN_MODULE_TYPES: &[&str] = &[
     "static",
     "battery",
     "cpu",
+    "temperature",
+    "temp",
     "memory",
     "disk",
     "network",

@@ -5,6 +5,7 @@ use gpui::{
     Window,
 };
 use std::process::Command;
+use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::RwLock;
 use std::sync::{Arc, Mutex};
@@ -20,6 +21,12 @@ static BAR_VIEWS: Mutex<Vec<WeakEntity<BarView>>> = Mutex::new(Vec::new());
 
 /// Flag to ensure only one refresh task runs globally
 static REFRESH_TASK_STARTED: AtomicBool = AtomicBool::new(false);
+
+/// Flag to ensure workspace observer is only set up once
+static WORKSPACE_OBSERVER_STARTED: AtomicBool = AtomicBool::new(false);
+
+/// Flag set when active application changes (checked by refresh task)
+static APP_CHANGED: AtomicBool = AtomicBool::new(false);
 
 /// The main menu bar view rendered with GPUI.
 pub struct BarView {
@@ -99,6 +106,9 @@ impl BarView {
             return;
         }
 
+        // Set up workspace observer for app activation notifications
+        setup_workspace_observer();
+
         // Start the global refresh task
         let task = cx.spawn(async move |_, cx| {
             let mut last_camera_active = camera::is_camera_active();
@@ -106,6 +116,8 @@ impl BarView {
             loop {
                 // Poll every second for camera state changes
                 cx.background_executor().timer(Duration::from_secs(1)).await;
+
+                let mut should_refresh = false;
 
                 // Check if camera state changed
                 let current_active = camera::is_camera_active();
@@ -116,17 +128,59 @@ impl BarView {
                         current_active
                     );
                     last_camera_active = current_active;
+                    should_refresh = true;
+                }
 
-                    // Only refresh when camera state actually changes
+                // Check if active app changed (set by workspace observer)
+                if APP_CHANGED.swap(false, Ordering::SeqCst) {
+                    log::debug!("Active app changed, refreshing");
+                    should_refresh = true;
+                }
+
+                if should_refresh {
                     let _ = cx.refresh();
                 }
             }
         });
 
         self.refresh_task = Some(task);
-        log::info!("Started global camera refresh task");
+        log::info!("Started global refresh task");
+    }
+}
+
+/// Sets up NSWorkspace observer to detect when the active application changes.
+fn setup_workspace_observer() {
+    if WORKSPACE_OBSERVER_STARTED.swap(true, Ordering::SeqCst) {
+        return; // Already started
     }
 
+    use block2::RcBlock;
+    use objc2_app_kit::NSWorkspace;
+    use objc2_foundation::{NSNotification, NSNotificationName};
+
+    unsafe {
+        let workspace = NSWorkspace::sharedWorkspace();
+        let notification_center = workspace.notificationCenter();
+
+        // NSWorkspaceDidActivateApplicationNotification
+        let name = NSNotificationName::from_str("NSWorkspaceDidActivateApplicationNotification");
+
+        let handler = RcBlock::new(|_notification: NonNull<NSNotification>| {
+            APP_CHANGED.store(true, Ordering::SeqCst);
+        });
+
+        notification_center.addObserverForName_object_queue_usingBlock(
+            Some(&name),
+            None,
+            None,
+            &handler,
+        );
+
+        log::info!("Workspace observer set up for app activation notifications");
+    }
+}
+
+impl BarView {
     /// Builds modules for the full-width bar, separated into 4 zones.
     fn build_modules(
         config: &Config,
@@ -299,40 +353,11 @@ impl BarView {
         // Add click handler for popup or command
         if let Some(ref popup_cfg) = pm.popup {
             let popup_type = popup_cfg.popup_type.clone();
-            let popup_anchor = popup_cfg.anchor;
-            let popup_height = popup_cfg.height as f64;
             wrapper = wrapper.on_mouse_down(MouseButton::Left, move |_event, _window, _cx| {
-                log::info!(
-                    "Module clicked, popup_type={:?}, height={}",
-                    popup_type,
-                    popup_height
-                );
-                // Toggle popups based on type
-                if popup_type.as_deref() == Some("demo") || popup_type.as_deref() == Some("news") {
-                    // Use generic panel toggle with content_id and height
-                    let content_id = popup_type.as_deref().unwrap_or("demo");
-                    crate::gpui_app::popup_manager::toggle_panel(content_id, popup_height);
-                } else if popup_type.as_deref() == Some("calendar") {
-                    // Get current mouse position for popup positioning
-                    let mouse_pos = get_mouse_screen_position();
-                    let align = match popup_anchor {
-                        crate::gpui_app::modules::PopupAnchor::Left => {
-                            crate::gpui_app::popup_manager::PopupAlign::Left
-                        }
-                        crate::gpui_app::modules::PopupAnchor::Center => {
-                            crate::gpui_app::popup_manager::PopupAlign::Center
-                        }
-                        crate::gpui_app::modules::PopupAnchor::Right => {
-                            crate::gpui_app::popup_manager::PopupAlign::Right
-                        }
-                    };
-                    // Use mouse X as trigger position, assume ~100px module width
-                    crate::gpui_app::popup_manager::toggle_calendar_popup_at(
-                        mouse_pos.0,
-                        100.0,
-                        align,
-                    );
-                }
+                // Use extension-based popup toggle
+                let extension_id = popup_type.as_deref().unwrap_or("demo");
+                log::info!("Module clicked, toggling extension popup: {}", extension_id);
+                crate::gpui_app::popup_manager::toggle_popup(extension_id);
             });
         } else if let Some(ref cmd) = pm.click_command {
             let command = cmd.clone();
@@ -361,13 +386,6 @@ fn execute_command(command: &str) {
     });
 }
 
-/// Get current mouse position in screen coordinates.
-fn get_mouse_screen_position() -> (f64, f64) {
-    use objc2_app_kit::NSEvent;
-    let location = NSEvent::mouseLocation();
-    (location.x, location.y)
-}
-
 impl Render for BarView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // Start the background refresh task on first render
@@ -381,7 +399,9 @@ impl Render for BarView {
 
         // Update modules periodically (rate-limited to every 500ms)
         if self.last_update.elapsed() > self.update_interval {
-            self.update_modules();
+            if self.update_modules() {
+                cx.notify(); // Trigger re-render if any module changed
+            }
             self.last_update = Instant::now();
         }
 

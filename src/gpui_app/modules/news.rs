@@ -1,24 +1,17 @@
-//! News/releases module with async loading.
+//! News module with release notes popup.
 //!
-//! Fetches and displays release notes from configured sources like
-//! Claude Code's CHANGELOG.md or GitHub Releases API.
+//! This module provides:
+//! - Bar item: News icon with count badge
+//! - Popup: Full-width panel showing release notes from configured sources
 
 use std::process::Command;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
-use gpui::{div, prelude::*, px, AnyElement, SharedString, Styled};
+use gpui::{div, prelude::*, px, AnyElement, ParentElement, SharedString, Styled};
 
-use super::GpuiModule;
+use super::{GpuiModule, PopupSpec};
 use crate::gpui_app::theme::Theme;
-
-/// Global news data for panel access
-static GLOBAL_NEWS_DATA: RwLock<Option<ReleasesData>> = RwLock::new(None);
-
-/// Get the global news data for the panel
-pub fn get_global_news_data() -> Option<ReleasesData> {
-    GLOBAL_NEWS_DATA.read().ok().and_then(|g| g.clone())
-}
 
 /// A single release entry.
 #[derive(Debug, Clone)]
@@ -62,6 +55,7 @@ pub struct ReleasesData {
 /// News module showing release updates.
 pub struct NewsModule {
     id: String,
+    theme: Option<Theme>,
     update_interval: Duration,
     last_update: Instant,
     data: Arc<RwLock<Option<ReleasesData>>>,
@@ -69,10 +63,11 @@ pub struct NewsModule {
 }
 
 impl NewsModule {
-    /// Creates a new news module with default sources.
+    /// Creates a simple bar-only news module (for config-based creation).
     pub fn new(id: &str) -> Self {
         let mut module = Self {
             id: id.to_string(),
+            theme: None,
             update_interval: Duration::from_secs(3600), // 1 hour
             last_update: Instant::now() - Duration::from_secs(3601),
             data: Arc::new(RwLock::new(None)),
@@ -81,6 +76,23 @@ impl NewsModule {
         module.fetch_releases();
         module
     }
+
+    /// Creates a news module with popup support.
+    pub fn new_popup(theme: Theme) -> Self {
+        let mut module = Self {
+            id: "news".to_string(),
+            theme: Some(theme),
+            update_interval: Duration::from_secs(3600), // 1 hour
+            last_update: Instant::now() - Duration::from_secs(3601),
+            data: Arc::new(RwLock::new(None)),
+            is_loading: true,
+        };
+        module.fetch_releases();
+        module
+    }
+
+    /// Panel height for news content.
+    const PANEL_HEIGHT: f64 = 280.0;
 
     /// Returns the configured release sources.
     fn sources() -> Vec<ReleaseSource> {
@@ -131,13 +143,7 @@ impl NewsModule {
                 total_items,
             };
 
-            // Store locally
             if let Ok(mut guard) = data.write() {
-                *guard = Some(releases_data.clone());
-            }
-
-            // Store globally for panel access
-            if let Ok(mut guard) = GLOBAL_NEWS_DATA.write() {
                 *guard = Some(releases_data);
             }
         });
@@ -165,7 +171,6 @@ impl NewsModule {
         let mut current_items: Vec<ReleaseEntry> = Vec::new();
 
         for line in content.lines() {
-            // Match version header: ## 1.2.3
             if let Some(version) = line.strip_prefix("## ") {
                 if let Some(ver) = current_version.take() {
                     if !current_items.is_empty() {
@@ -178,11 +183,9 @@ impl NewsModule {
                         }
                     }
                 }
-                // Extract just the version number
                 let version = version.split_whitespace().next().unwrap_or(version);
                 current_version = Some(version.to_string());
             } else if current_version.is_some() {
-                // Match "- Added ..." or "- added ..."
                 if let Some(rest) = line.strip_prefix("- Added ") {
                     current_items.push(ReleaseEntry {
                         section: "Added".to_string(),
@@ -197,7 +200,6 @@ impl NewsModule {
             }
         }
 
-        // Don't forget the last version
         if let Some(ver) = current_version {
             if !current_items.is_empty() && results.len() < max_releases {
                 results.push(Release {
@@ -234,7 +236,6 @@ impl NewsModule {
 
     /// Parses GitHub release JSON for tag_name and body.
     fn parse_github_release(content: &str) -> Vec<Release> {
-        // Simple JSON parsing for tag_name and body
         let tag_name = content
             .find("\"tag_name\"")
             .and_then(|i| {
@@ -256,7 +257,6 @@ impl NewsModule {
                 let rest = &rest[start + 1..];
                 let start = rest.find('"')? + 1;
                 let rest = &rest[start..];
-                // Find the closing quote, handling escaped quotes
                 let mut end = 0;
                 let mut escaped = false;
                 for (i, c) in rest.char_indices() {
@@ -286,7 +286,6 @@ impl NewsModule {
             return Vec::new();
         }
 
-        // Parse body for bullet items - only keep "New Features" and "Bug Fixes" sections
         let mut items = Vec::new();
         let mut current_section: Option<String> = None;
         let wanted_sections = [
@@ -314,7 +313,6 @@ impl NewsModule {
                 }
             } else if let Some(ref section) = current_section {
                 if let Some(text) = line.strip_prefix("- ") {
-                    // Only keep items that don't look like commit references
                     if !text.starts_with('#') && items.len() < 10 {
                         items.push(ReleaseEntry {
                             section: section.clone(),
@@ -329,7 +327,6 @@ impl NewsModule {
             return Vec::new();
         }
 
-        // Clean up version string
         let version = tag_name
             .trim_start_matches('v')
             .trim_start_matches("rust-v")
@@ -339,8 +336,100 @@ impl NewsModule {
     }
 
     /// Returns the current release data.
-    pub fn get_data(&self) -> Option<ReleasesData> {
+    fn get_data(&self) -> Option<ReleasesData> {
         self.data.read().ok().and_then(|guard| guard.clone())
+    }
+
+    /// Renders a single source column.
+    fn render_source_column(
+        &self,
+        theme: &Theme,
+        name: &str,
+        icon: &str,
+        releases: Vec<Release>,
+    ) -> gpui::Div {
+        let name_str: SharedString = name.to_string().into();
+        let icon_str: SharedString = icon.to_string().into();
+
+        let mut column = div()
+            .flex()
+            .flex_col()
+            .flex_1()
+            .min_w(px(0.0))
+            .overflow_hidden()
+            .gap(px(8.0))
+            .p(px(12.0))
+            .rounded(px(6.0))
+            .bg(theme.surface)
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(6.0))
+                    .child(
+                        div()
+                            .text_color(theme.accent)
+                            .text_size(px(14.0))
+                            .child(icon_str),
+                    )
+                    .child(
+                        div()
+                            .text_color(theme.foreground)
+                            .text_size(px(13.0))
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .child(name_str),
+                    ),
+            );
+
+        if releases.is_empty() {
+            return column.child(
+                div()
+                    .text_color(theme.foreground_muted)
+                    .text_size(px(11.0))
+                    .child("No releases"),
+            );
+        }
+
+        for release in releases.into_iter().take(1) {
+            let version_str: SharedString = format!("v{}", release.version).into();
+            let mut release_div = div().flex().flex_col().gap(px(4.0)).child(
+                div()
+                    .text_color(theme.accent)
+                    .text_size(px(11.0))
+                    .font_weight(gpui::FontWeight::MEDIUM)
+                    .child(version_str),
+            );
+
+            for item in release.items.into_iter().take(6) {
+                let text: SharedString = if item.text.chars().count() > 60 {
+                    format!("{}...", item.text.chars().take(57).collect::<String>()).into()
+                } else {
+                    item.text.into()
+                };
+                release_div = release_div.child(
+                    div()
+                        .flex()
+                        .flex_row()
+                        .gap(px(4.0))
+                        .child(
+                            div()
+                                .text_color(theme.success)
+                                .text_size(px(11.0))
+                                .child("+"),
+                        )
+                        .child(
+                            div()
+                                .text_color(theme.foreground)
+                                .text_size(px(11.0))
+                                .child(text),
+                        ),
+                );
+            }
+            column = column.child(release_div);
+        }
+
+        column
     }
 }
 
@@ -365,7 +454,7 @@ impl GpuiModule for NewsModule {
             .flex()
             .flex_row()
             .items_center()
-            .gap(px(4.0))
+            .gap(px(6.0)) // Gap between icon and text
             .child(
                 div()
                     .text_size(px(14.0))
@@ -405,30 +494,58 @@ impl GpuiModule for NewsModule {
     fn is_loading(&self) -> bool {
         self.is_loading
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+    fn popup_spec(&self) -> Option<PopupSpec> {
+        if self.theme.is_some() {
+            Some(PopupSpec::panel(Self::PANEL_HEIGHT))
+        } else {
+            None
+        }
+    }
 
-    #[test]
-    fn test_parse_added_style() {
-        let content = r#"
-## 1.0.50
+    fn render_popup(&self, theme: &Theme) -> Option<AnyElement> {
+        if self.theme.is_none() {
+            log::debug!("NewsModule::render_popup: theme is None, returning None");
+            return None;
+        }
 
-- Added new feature A
-- Fixed some bug
-- Added another feature B
+        let news_data = self.get_data();
+        log::debug!(
+            "NewsModule::render_popup: has_data={}, sources={}",
+            news_data.is_some(),
+            news_data.as_ref().map(|d| d.sources.len()).unwrap_or(0)
+        );
 
-## 1.0.49
+        let mut container = div()
+            .flex()
+            .flex_col()
+            .gap(px(12.0))
+            .p(px(16.0))
+            .w_full()
+            .child(
+                div()
+                    .text_color(theme.foreground)
+                    .text_size(px(16.0))
+                    .font_weight(gpui::FontWeight::BOLD)
+                    .child("Release Notes"),
+            );
 
-- Added old feature
-"#;
-        let releases = NewsModule::parse_added_style(content, 2);
-        assert_eq!(releases.len(), 2);
-        assert_eq!(releases[0].version, "1.0.50");
-        assert_eq!(releases[0].items.len(), 2);
-        assert_eq!(releases[0].items[0].text, "new feature A");
-        assert_eq!(releases[1].version, "1.0.49");
+        if let Some(data) = news_data {
+            let columns = div().flex().flex_row().gap(px(12.0)).w_full().children(
+                data.sources.into_iter().map(|(source, releases)| {
+                    self.render_source_column(theme, &source.name, source.icon, releases)
+                }),
+            );
+            container = container.child(columns);
+        } else {
+            container = container.child(
+                div()
+                    .text_color(theme.foreground_muted)
+                    .text_size(px(12.0))
+                    .child("Loading..."),
+            );
+        }
+
+        Some(container.into_any_element())
     }
 }

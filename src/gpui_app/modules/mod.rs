@@ -2,6 +2,7 @@
 //!
 //! Modules are the functional units that display information in the bar.
 //! Each module implements the GpuiModule trait to render its content.
+//! Modules may optionally provide popup content.
 
 mod app_name;
 mod battery;
@@ -15,10 +16,12 @@ mod disk;
 mod memory;
 pub mod news;
 mod now_playing;
+mod popup_host;
 mod script;
 mod separator;
 mod skeleton_demo;
 mod static_text;
+mod temperature;
 mod volume;
 mod weather;
 mod wifi;
@@ -26,7 +29,7 @@ mod window_title;
 
 pub use app_name::AppNameModule;
 pub use battery::BatteryModule;
-pub use calendar::{CalendarView, TIMEZONES};
+pub use calendar::CalendarModule;
 pub use clock::ClockModule;
 pub use cpu::CpuModule;
 pub use date::DateModule;
@@ -34,33 +37,107 @@ pub use datetime::DateTimeModule;
 pub use demo::DemoModule;
 pub use disk::DiskModule;
 pub use memory::MemoryModule;
-pub use news::{get_global_news_data, NewsModule, Release};
+pub use news::NewsModule;
 pub use now_playing::NowPlayingModule;
+pub use popup_host::PopupHostView;
 pub use script::ScriptModule;
 pub use separator::SeparatorModule;
 pub use skeleton_demo::SkeletonDemoModule;
 pub use static_text::StaticTextModule;
+pub use temperature::TemperatureModule;
 pub use volume::VolumeModule;
 pub use weather::WeatherModule;
 pub use wifi::WifiModule;
 pub use window_title::WindowTitleModule;
 
 use gpui::AnyElement;
+use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
 
 use crate::config::{parse_hex_color, ModuleConfig};
 use crate::gpui_app::theme::Theme;
 
+/// Popup type determines window behavior.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PopupType {
+    /// Small popup anchored to trigger (like calendar)
+    #[default]
+    Popup,
+    /// Full-width panel below bar (like news, demo)
+    Panel,
+}
+
+/// Specification for a module's popup window.
+#[derive(Debug, Clone)]
+pub struct PopupSpec {
+    /// Width of the popup in pixels
+    pub width: f64,
+    /// Height of the popup in pixels (module calculates this)
+    pub height: f64,
+    /// How to anchor the popup relative to trigger
+    pub anchor: PopupAnchor,
+    /// Type of popup (popup vs full-width panel)
+    pub popup_type: PopupType,
+}
+
+impl PopupSpec {
+    /// Creates a new popup spec.
+    pub fn new(width: f64, height: f64) -> Self {
+        Self {
+            width,
+            height,
+            anchor: PopupAnchor::Center,
+            popup_type: PopupType::Popup,
+        }
+    }
+
+    /// Creates a full-width panel spec.
+    pub fn panel(height: f64) -> Self {
+        Self {
+            width: 0.0, // Full width, determined at runtime
+            height,
+            anchor: PopupAnchor::Left,
+            popup_type: PopupType::Panel,
+        }
+    }
+
+    /// Sets the anchor position.
+    pub fn with_anchor(mut self, anchor: PopupAnchor) -> Self {
+        self.anchor = anchor;
+        self
+    }
+}
+
+/// Events that can be sent to a module's popup.
+#[derive(Debug, Clone)]
+pub enum PopupEvent {
+    /// Popup was opened
+    Opened,
+    /// Popup was closed
+    Closed,
+    /// Mouse entered popup
+    MouseEntered,
+    /// Mouse left popup
+    MouseLeft,
+    /// Scroll event with delta
+    Scroll { delta_x: f32, delta_y: f32 },
+}
+
 /// Trait for GPUI-based bar modules.
+///
+/// Modules can optionally provide popup content by implementing popup_spec() and render_popup().
 pub trait GpuiModule: Send + Sync {
     /// Returns the unique identifier for this module.
     fn id(&self) -> &str;
 
-    /// Renders the module as a GPUI element.
+    /// Renders the module's bar item as a GPUI element.
     fn render(&self, theme: &Theme) -> AnyElement;
 
     /// Updates the module's internal state.
     /// Returns true if the module needs to be re-rendered.
-    fn update(&mut self) -> bool;
+    fn update(&mut self) -> bool {
+        false
+    }
 
     /// Returns the current value (0-100) for threshold-based coloring.
     /// Returns None if the module doesn't support value-based colors.
@@ -72,6 +149,20 @@ pub trait GpuiModule: Send + Sync {
     fn is_loading(&self) -> bool {
         false
     }
+
+    /// Returns the popup specification (if any).
+    /// The module calculates its own dimensions.
+    fn popup_spec(&self) -> Option<PopupSpec> {
+        None
+    }
+
+    /// Renders the popup content (if any).
+    fn render_popup(&self, _theme: &Theme) -> Option<AnyElement> {
+        None
+    }
+
+    /// Handles popup lifecycle events.
+    fn on_popup_event(&mut self, _event: PopupEvent) {}
 }
 
 /// Module styling options.
@@ -218,6 +309,14 @@ pub fn create_module(config: &ModuleConfig, index: usize) -> Option<PositionedMo
                 label_align,
             )))
         }
+        "temperature" | "temp" => {
+            let label_align = parse_label_align(config.label_align.as_deref());
+            Some(Box::new(TemperatureModule::new(
+                &id,
+                config.label.as_deref(),
+                label_align,
+            )))
+        }
         "memory" => {
             let label_align = parse_label_align(config.label_align.as_deref());
             Some(Box::new(MemoryModule::new(
@@ -354,4 +453,77 @@ fn parse_module_style(config: &ModuleConfig) -> ModuleStyle {
         active_border_color: config.active_border_color.as_ref().and_then(|c| to_rgba(c)),
         active_text_color: config.active_color.as_ref().and_then(|c| to_rgba(c)),
     }
+}
+
+/// Registry for managing popup-capable modules.
+pub struct ModuleRegistry {
+    modules: HashMap<String, Arc<RwLock<dyn GpuiModule>>>,
+}
+
+impl ModuleRegistry {
+    /// Creates a new empty registry.
+    pub fn new() -> Self {
+        Self {
+            modules: HashMap::new(),
+        }
+    }
+
+    /// Registers a module.
+    pub fn register<M: GpuiModule + 'static>(&mut self, module: M) {
+        let id = module.id().to_string();
+        self.modules.insert(id, Arc::new(RwLock::new(module)));
+    }
+
+    /// Gets a module by ID.
+    pub fn get(&self, id: &str) -> Option<Arc<RwLock<dyn GpuiModule>>> {
+        self.modules.get(id).cloned()
+    }
+
+    /// Returns all registered module IDs.
+    pub fn ids(&self) -> Vec<String> {
+        self.modules.keys().cloned().collect()
+    }
+}
+
+impl Default for ModuleRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Global module registry for popup-capable modules.
+static MODULE_REGISTRY: RwLock<Option<ModuleRegistry>> = RwLock::new(None);
+
+/// Initializes the global module registry with popup-capable modules.
+pub fn init_modules(theme: &Theme) {
+    let mut registry = ModuleRegistry::new();
+
+    // Register popup-capable modules
+    registry.register(CalendarModule::new(theme.clone()));
+    registry.register(NewsModule::new_popup(theme.clone()));
+    registry.register(DemoModule::new_popup(theme.clone()));
+
+    // Log registered modules
+    let registered: Vec<&str> = registry.modules.keys().map(|s| s.as_str()).collect();
+    log::info!("Module registry: registering {:?}", registered);
+
+    if let Ok(mut global) = MODULE_REGISTRY.write() {
+        *global = Some(registry);
+    }
+    log::info!("Module registry initialized");
+}
+
+/// Gets a module from the global registry.
+pub fn get_module(id: &str) -> Option<Arc<RwLock<dyn GpuiModule>>> {
+    let result = MODULE_REGISTRY
+        .read()
+        .ok()
+        .and_then(|guard| guard.as_ref().and_then(|r| r.get(id)));
+    log::debug!("get_module('{}') -> found={}", id, result.is_some());
+    result
+}
+
+/// Gets the popup spec for a module.
+pub fn get_popup_spec(id: &str) -> Option<PopupSpec> {
+    get_module(id).and_then(|m| m.read().ok().and_then(|e| e.popup_spec()))
 }

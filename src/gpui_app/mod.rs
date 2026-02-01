@@ -7,8 +7,6 @@
 mod bar;
 pub mod camera;
 pub mod modules;
-mod panel;
-pub mod popup;
 pub mod popup_manager;
 pub mod primitives;
 pub mod theme;
@@ -26,36 +24,6 @@ use crate::window::get_main_screen_info;
 /// Menu bar window level (-20) - same as SketchyBar.
 /// This allows the macOS menu bar (level 24) to appear above RustyBar.
 const MENU_BAR_WINDOW_LEVEL: i64 = -20;
-
-/// Calculate calendar popup height based on current month's week count.
-fn calculate_calendar_height() -> f64 {
-    use chrono::{Datelike, Local, NaiveDate};
-
-    let today = Local::now().date_naive();
-    let year = today.year();
-    let month = today.month();
-
-    // Calculate weeks needed for current month
-    let first_day = NaiveDate::from_ymd_opt(year, month, 1).unwrap();
-    let days_in_month = if month == 12 {
-        NaiveDate::from_ymd_opt(year + 1, 1, 1)
-    } else {
-        NaiveDate::from_ymd_opt(year, month + 1, 1)
-    }
-    .unwrap()
-    .signed_duration_since(first_day)
-    .num_days() as u32;
-    let first_weekday = first_day.weekday().num_days_from_sunday();
-    let weeks = ((first_weekday + days_in_month + 6) / 7) as f64;
-
-    // Calendar section: header(44) + weekdays(20) + weeks*42 + bottom_margin(16)
-    let calendar = 44.0 + 20.0 + (weeks * 42.0) + 16.0;
-    // Timezone section: slider(70) + rows(50 each)
-    let timezone_count = modules::TIMEZONES.len() as f64;
-    let timezones = 70.0 + (timezone_count * 50.0);
-    // Total with border
-    calendar + timezones + 2.0
-}
 
 /// Runs the GPUI-based RustyBar application.
 pub fn run() {
@@ -87,40 +55,40 @@ pub fn run() {
         // so initial state is correct
         camera::start_monitoring();
 
-        // Initialize popup manager (registers popup closers for mutual exclusion)
+        // Initialize popup manager
         popup_manager::init();
+
+        // Initialize module registry with theme
+        let theme = theme::Theme::from_config(&config.bar);
+        modules::init_modules(&theme);
 
         create_bar_window(cx, mtm, screen_x, macos_y, screen_width, bar_height);
 
         // Create the panel window (hidden by default)
-        let theme = theme::Theme::from_config(&config.bar);
-        let panel_height = 300.0; // Initial height, PanelView will resize based on content
+        let panel_height = 300.0; // Initial height, PopupHostView will resize based on content
         let panel_width = screen_width;
         let panel_x = screen_x;
 
-        create_panel_window(cx, mtm, panel_x, macos_y, panel_width, panel_height, theme);
-
-        // Hide the panel immediately after creation
-        popup_manager::hide_panel_on_create();
-
-        // Create the calendar popup window (hidden by default)
-        // Calculate height based on actual content structure
-        let calendar_width = 280.0;
-        let calendar_height = calculate_calendar_height();
-        let calendar_x = screen_x + screen_width - calendar_width - 80.0;
-
-        create_calendar_window(
+        create_panel_window(
             cx,
             mtm,
-            calendar_x,
+            panel_x,
             macos_y,
-            calendar_width,
-            calendar_height,
-            theme::Theme::from_config(&config.bar),
+            panel_width,
+            panel_height,
+            theme.clone(),
         );
 
-        // Hide the calendar immediately after creation
-        popup_manager::hide_calendar_on_create();
+        // Create the calendar popup window (hidden by default)
+        // Height will be determined by the calendar extension
+        let popup_width = 280.0;
+        let popup_height = 520.0; // Initial estimate, will resize
+        let popup_x = screen_x + screen_width - popup_width - 80.0;
+
+        create_popup_window(cx, mtm, popup_x, macos_y, popup_width, popup_height, theme);
+
+        // Hide all popups immediately after creation
+        popup_manager::hide_popups_on_create();
 
         log::info!("GPUI app initialization complete");
     });
@@ -160,7 +128,7 @@ fn create_panel_window(
                 window_background: gpui::WindowBackgroundAppearance::Opaque,
                 ..Default::default()
             },
-            |_window, cx| cx.new(|cx| panel::PanelView::new(theme, cx)),
+            |_window, cx| cx.new(|cx| modules::PopupHostView::panel(theme, cx)),
         )
         .expect("Failed to create panel window");
 
@@ -220,7 +188,7 @@ fn configure_panel_window(mtm: MainThreadMarker, x: f64, bar_y: f64, width: f64,
     }
 }
 
-fn create_calendar_window(
+fn create_popup_window(
     cx: &mut App,
     mtm: MainThreadMarker,
     x: f64,
@@ -235,7 +203,7 @@ fn create_calendar_window(
     };
 
     log::info!(
-        "Creating calendar window: size {}x{} at macOS ({}, {})",
+        "Creating popup window: size {}x{} at macOS ({}, {})",
         width,
         height,
         x,
@@ -254,18 +222,18 @@ fn create_calendar_window(
                 window_background: gpui::WindowBackgroundAppearance::Transparent,
                 ..Default::default()
             },
-            |_window, cx| cx.new(|_cx| popup::CalendarPopupView::new(theme)),
+            |_window, cx| cx.new(|cx| modules::PopupHostView::popup(theme, cx)),
         )
-        .expect("Failed to create calendar window");
+        .expect("Failed to create popup window");
 
     window
         .update(cx, |_, _window, _cx| {
-            configure_calendar_window(mtm, x, macos_y, width, height);
+            configure_popup_window(mtm, x, macos_y, width, height);
         })
         .ok();
 }
 
-fn configure_calendar_window(mtm: MainThreadMarker, x: f64, bar_y: f64, width: f64, height: f64) {
+fn configure_popup_window(mtm: MainThreadMarker, x: f64, bar_y: f64, width: f64, height: f64) {
     use objc2_app_kit::{NSApplication, NSWindowStyleMask};
     use objc2_foundation::NSRect;
 
@@ -276,12 +244,11 @@ fn configure_calendar_window(mtm: MainThreadMarker, x: f64, bar_y: f64, width: f
         let windows = app.windows();
 
         log::debug!(
-            "configure_calendar_window: checking {} windows for calendar",
+            "configure_popup_window: checking {} windows for popup",
             windows.len()
         );
 
-        // Find the calendar window by its width (only window with width < 500)
-        // Calendar: ~280x520, Panel: ~1512x712, Bar: ~1512x32
+        // Find the popup window by its width (only window with width < 500)
         for i in (0..windows.len()).rev() {
             let ns_window = windows.objectAtIndex(i);
             let frame = ns_window.frame();
@@ -293,7 +260,7 @@ fn configure_calendar_window(mtm: MainThreadMarker, x: f64, bar_y: f64, width: f
                 frame.size.height
             );
 
-            // Match calendar by width (only popup window with width < 500)
+            // Match popup by width (only popup window with width < 500)
             if frame.size.width > 200.0 && frame.size.width < 500.0 && frame.size.height > 200.0 {
                 ns_window.setStyleMask(NSWindowStyleMask::Borderless);
 
@@ -311,7 +278,7 @@ fn configure_calendar_window(mtm: MainThreadMarker, x: f64, bar_y: f64, width: f
                 ns_window.setIgnoresMouseEvents(false);
 
                 log::info!(
-                    "Configured calendar window: frame=({}, {}) {}x{}",
+                    "Configured popup window: frame=({}, {}) {}x{}",
                     x,
                     popup_y,
                     width,

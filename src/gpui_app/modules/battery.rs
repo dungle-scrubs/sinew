@@ -68,7 +68,7 @@ impl GpuiModule for BatteryModule {
 
     fn render(&self, theme: &Theme) -> AnyElement {
         let icon = battery_icons::for_level(self.level, self.charging);
-        let text = format!("{} {}%", icon, self.level);
+        let text = format!("{}%", self.level);
 
         if let Some(ref label) = self.label {
             // Two-line layout with label - tight spacing
@@ -86,9 +86,13 @@ impl GpuiModule for BatteryModule {
                 )
                 .child(
                     div()
+                        .flex()
+                        .items_center()
+                        .gap(px(6.0)) // Gap between icon and text
                         .text_color(theme.foreground)
                         .text_size(px(theme.font_size))
                         .line_height(px(theme.font_size * 1.1))
+                        .child(SharedString::from(icon.to_string()))
                         .child(SharedString::from(text)),
                 )
                 .into_any_element()
@@ -96,8 +100,10 @@ impl GpuiModule for BatteryModule {
             div()
                 .flex()
                 .items_center()
+                .gap(px(6.0)) // Gap between icon and text
                 .text_color(theme.foreground)
                 .text_size(px(theme.font_size))
+                .child(SharedString::from(icon.to_string()))
                 .child(SharedString::from(text))
                 .into_any_element()
         }

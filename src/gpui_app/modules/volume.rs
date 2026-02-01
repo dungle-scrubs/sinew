@@ -62,16 +62,18 @@ impl GpuiModule for VolumeModule {
     fn render(&self, theme: &Theme) -> AnyElement {
         let icon = volume_icons::for_level(self.level, self.muted);
         let text = if self.muted {
-            format!("{} muted", icon)
+            "muted".to_string()
         } else {
-            format!("{} {}%", icon, self.level)
+            format!("{}%", self.level)
         };
 
         div()
             .flex()
             .items_center()
+            .gap(px(6.0)) // Gap between icon and text
             .text_color(theme.foreground)
             .text_size(px(theme.font_size))
+            .child(SharedString::from(icon.to_string()))
             .child(SharedString::from(text))
             .into_any_element()
     }

@@ -92,7 +92,44 @@ impl NewsModule {
     }
 
     /// Panel height for news content.
-    const PANEL_HEIGHT: f64 = 280.0;
+    const PANEL_HEIGHT: f64 = 360.0;
+    /// Height when no data is available yet.
+    const EMPTY_HEIGHT: f64 = 120.0;
+
+    fn estimated_panel_height(&self, data: &ReleasesData) -> f64 {
+        // Rough layout math to keep panel height close to content, capped by PANEL_HEIGHT.
+        let container_padding = 32.0; // p(16) top + bottom
+        let title_height = 24.0;
+        let title_gap = 12.0; // gap between title and columns
+
+        let mut max_column_height = 0.0;
+        for (_source, releases) in data.sources.iter() {
+            let column_padding = 24.0; // p(12) top + bottom
+            let header_height = 18.0;
+            let header_gap = 8.0; // column gap
+
+            let column_body = if releases.is_empty() {
+                14.0
+            } else {
+                let items = releases
+                    .get(0)
+                    .map(|r| r.items.len().min(6) as f64)
+                    .unwrap_or(0.0);
+                let version_height = 14.0;
+                let item_height = 14.0;
+                let item_gap = 4.0;
+                version_height + (items * item_height) + (items * item_gap)
+            };
+
+            let column_height = column_padding + header_height + header_gap + column_body;
+            if column_height > max_column_height {
+                max_column_height = column_height;
+            }
+        }
+
+        let total = container_padding + title_height + title_gap + max_column_height + 8.0;
+        total.min(Self::PANEL_HEIGHT)
+    }
 
     /// Returns the configured release sources.
     fn sources() -> Vec<ReleaseSource> {
@@ -123,17 +160,26 @@ impl NewsModule {
     fn fetch_releases(&mut self) {
         self.is_loading = true;
         let data = Arc::clone(&self.data);
+        log::info!("NewsModule::fetch_releases start");
 
         std::thread::spawn(move || {
+            let fetch_start = Instant::now();
             let sources = Self::sources();
             let mut results: Vec<(ReleaseSource, Vec<Release>)> = Vec::new();
             let mut total_items = 0;
 
             for source in sources {
+                let source_start = Instant::now();
                 let releases = match source.parse_mode {
                     ParseMode::Added => Self::fetch_added_style(&source.url),
                     ParseMode::GitHubRelease => Self::fetch_github_release(&source.url),
                 };
+                log::debug!(
+                    "NewsModule::fetch_releases source='{}' took {:?} (items={})",
+                    source.name,
+                    source_start.elapsed(),
+                    releases.iter().map(|r| r.items.len()).sum::<usize>()
+                );
                 total_items += releases.iter().map(|r| r.items.len()).sum::<usize>();
                 results.push((source, releases));
             }
@@ -143,21 +189,29 @@ impl NewsModule {
                 total_items,
             };
 
+            let sources_len = releases_data.sources.len();
             if let Ok(mut guard) = data.write() {
                 *guard = Some(releases_data);
             }
+            log::info!(
+                "NewsModule::fetch_releases done: sources={}, total_items={}, took {:?}",
+                sources_len,
+                total_items,
+                fetch_start.elapsed()
+            );
         });
     }
 
     /// Fetches and parses CHANGELOG.md for "- Added ..." entries.
     fn fetch_added_style(url: &str) -> Vec<Release> {
         let output = Command::new("curl")
-            .args(["-s", "-m", "10", url])
+            .args(["-s", "-L", "-m", "10", "-H", "User-Agent: RustyBar", url])
             .output()
             .ok()
             .and_then(|o| String::from_utf8(o.stdout).ok());
 
         let Some(content) = output else {
+            log::warn!("NewsModule::fetch_added_style: empty response");
             return Vec::new();
         };
 
@@ -217,10 +271,13 @@ impl NewsModule {
         let output = Command::new("curl")
             .args([
                 "-s",
+                "-L",
                 "-m",
                 "10",
                 "-H",
                 "Accept: application/vnd.github.v3+json",
+                "-H",
+                "User-Agent: RustyBar",
                 url,
             ])
             .output()
@@ -228,6 +285,7 @@ impl NewsModule {
             .and_then(|o| String::from_utf8(o.stdout).ok());
 
         let Some(content) = output else {
+            log::warn!("NewsModule::fetch_github_release: empty response");
             return Vec::new();
         };
 
@@ -367,6 +425,7 @@ impl NewsModule {
                     .flex_row()
                     .items_center()
                     .gap(px(6.0))
+                    .h(px(18.0))
                     .child(
                         div()
                             .text_color(theme.accent)
@@ -387,6 +446,7 @@ impl NewsModule {
                 div()
                     .text_color(theme.foreground_muted)
                     .text_size(px(11.0))
+                    .h(px(14.0))
                     .child("No releases"),
             );
         }
@@ -398,6 +458,7 @@ impl NewsModule {
                     .text_color(theme.accent)
                     .text_size(px(11.0))
                     .font_weight(gpui::FontWeight::MEDIUM)
+                    .h(px(14.0))
                     .child(version_str),
             );
 
@@ -412,6 +473,7 @@ impl NewsModule {
                         .flex()
                         .flex_row()
                         .gap(px(4.0))
+                        .h(px(14.0))
                         .child(
                             div()
                                 .text_color(theme.success)
@@ -477,6 +539,7 @@ impl GpuiModule for NewsModule {
                 if guard.is_some() {
                     self.is_loading = false;
                     self.last_update = Instant::now();
+                    log::info!("NewsModule::update: initial load complete");
                     return true;
                 }
             }
@@ -484,6 +547,7 @@ impl GpuiModule for NewsModule {
 
         // Check if we need to refresh
         if self.last_update.elapsed() > self.update_interval {
+            log::info!("NewsModule::update: refresh interval reached, refetching");
             self.fetch_releases();
             return true;
         }
@@ -497,7 +561,11 @@ impl GpuiModule for NewsModule {
 
     fn popup_spec(&self) -> Option<PopupSpec> {
         if self.theme.is_some() {
-            Some(PopupSpec::panel(Self::PANEL_HEIGHT))
+            let height = match self.get_data() {
+                Some(ref data) => self.estimated_panel_height(data),
+                None => Self::EMPTY_HEIGHT,
+            };
+            Some(PopupSpec::panel(height))
         } else {
             None
         }

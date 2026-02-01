@@ -4,6 +4,7 @@
 //! - Bar item: News icon with count badge
 //! - Popup: Full-width panel showing release notes from configured sources
 
+use std::io::Write;
 use std::process::Command;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
@@ -43,6 +44,8 @@ pub enum ParseMode {
     Added,
     /// Parse GitHub Releases API JSON
     GitHubRelease,
+    /// Parse GitHub Releases API JSON and keep "- Added ..." items
+    GitHubReleaseAdded,
 }
 
 /// Cached release data for all sources.
@@ -91,18 +94,20 @@ impl NewsModule {
         module
     }
 
-    /// Panel height for news content.
-    const PANEL_HEIGHT: f64 = 360.0;
+    /// Fallback panel height for news content.
+    const PANEL_HEIGHT: f64 = 475.0;
     /// Height when no data is available yet.
     const EMPTY_HEIGHT: f64 = 120.0;
 
     fn estimated_panel_height(&self, data: &ReleasesData) -> f64 {
-        // Rough layout math to keep panel height close to content, capped by PANEL_HEIGHT.
+        // Rough layout math to keep panel height close to content, capped by half screen.
         let container_padding = 32.0; // p(16) top + bottom
         let title_height = 24.0;
-        let title_gap = 12.0; // gap between title and columns
+        let title_gap = 12.0; // gap between title and first row
+        let row_gap = 12.0; // gap between rows
 
         let mut max_column_height = 0.0;
+        let mut column_heights = Vec::with_capacity(data.sources.len());
         for (_source, releases) in data.sources.iter() {
             let column_padding = 24.0; // p(12) top + bottom
             let header_height = 18.0;
@@ -122,13 +127,25 @@ impl NewsModule {
             };
 
             let column_height = column_padding + header_height + header_gap + column_body;
+            column_heights.push(column_height);
             if column_height > max_column_height {
                 max_column_height = column_height;
             }
         }
 
-        let total = container_padding + title_height + title_gap + max_column_height + 8.0;
-        total.min(Self::PANEL_HEIGHT)
+        let row_heights = if column_heights.is_empty() {
+            vec![0.0]
+        } else {
+            column_heights
+                .chunks(3)
+                .map(|chunk| chunk.iter().cloned().fold(0.0, f64::max))
+                .collect::<Vec<_>>()
+        };
+        let rows_total = row_heights.iter().sum::<f64>()
+            + row_gap * (row_heights.len().saturating_sub(1) as f64);
+        let total = container_padding + title_height + title_gap + rows_total + 8.0;
+        let max_height = crate::gpui_app::popup_manager::max_panel_height();
+        total.min(max_height.max(Self::PANEL_HEIGHT))
     }
 
     /// Returns the configured release sources.
@@ -153,6 +170,12 @@ impl NewsModule {
                 icon: "🦀",
                 parse_mode: ParseMode::GitHubRelease,
             },
+            ReleaseSource {
+                name: "Pi".to_string(),
+                url: "https://api.github.com/repos/badlogic/pi-mono/releases/latest".to_string(),
+                icon: "π",
+                parse_mode: ParseMode::GitHubReleaseAdded,
+            },
         ]
     }
 
@@ -173,6 +196,7 @@ impl NewsModule {
                 let releases = match source.parse_mode {
                     ParseMode::Added => Self::fetch_added_style(&source.url),
                     ParseMode::GitHubRelease => Self::fetch_github_release(&source.url),
+                    ParseMode::GitHubReleaseAdded => Self::fetch_github_release_added(&source.url),
                 };
                 log::debug!(
                     "NewsModule::fetch_releases source='{}' took {:?} (items={})",
@@ -292,6 +316,31 @@ impl NewsModule {
         Self::parse_github_release(&content)
     }
 
+    fn fetch_github_release_added(url: &str) -> Vec<Release> {
+        let output = Command::new("curl")
+            .args([
+                "-s",
+                "-L",
+                "-m",
+                "10",
+                "-H",
+                "Accept: application/vnd.github.v3+json",
+                "-H",
+                "User-Agent: RustyBar",
+                url,
+            ])
+            .output()
+            .ok()
+            .and_then(|o| String::from_utf8(o.stdout).ok());
+
+        let Some(content) = output else {
+            log::warn!("NewsModule::fetch_github_release_added: empty response");
+            return Vec::new();
+        };
+
+        Self::parse_github_release_added(&content)
+    }
+
     /// Parses GitHub release JSON for tag_name and body.
     fn parse_github_release(content: &str) -> Vec<Release> {
         let tag_name = content
@@ -393,6 +442,84 @@ impl NewsModule {
         vec![Release { version, items }]
     }
 
+    fn parse_github_release_added(content: &str) -> Vec<Release> {
+        let tag_name = content
+            .find("\"tag_name\"")
+            .and_then(|i| {
+                let rest = &content[i..];
+                let start = rest.find(':')?;
+                let rest = &rest[start + 1..];
+                let start = rest.find('"')? + 1;
+                let rest = &rest[start..];
+                let end = rest.find('"')?;
+                Some(rest[..end].to_string())
+            })
+            .unwrap_or_default();
+
+        let body = content
+            .find("\"body\"")
+            .and_then(|i| {
+                let rest = &content[i..];
+                let start = rest.find(':')?;
+                let rest = &rest[start + 1..];
+                let start = rest.find('"')? + 1;
+                let rest = &rest[start..];
+                let mut end = 0;
+                let mut escaped = false;
+                for (i, c) in rest.char_indices() {
+                    if escaped {
+                        escaped = false;
+                        continue;
+                    }
+                    if c == '\\' {
+                        escaped = true;
+                        continue;
+                    }
+                    if c == '"' {
+                        end = i;
+                        break;
+                    }
+                }
+                Some(
+                    rest[..end]
+                        .replace("\\n", "\n")
+                        .replace("\\r", "")
+                        .replace("\\\"", "\""),
+                )
+            })
+            .unwrap_or_default();
+
+        if tag_name.is_empty() {
+            return Vec::new();
+        }
+
+        let mut items = Vec::new();
+        for line in body.lines() {
+            if let Some(text) = line
+                .strip_prefix("- Added ")
+                .or_else(|| line.strip_prefix("- added "))
+            {
+                if items.len() < 10 {
+                    items.push(ReleaseEntry {
+                        section: "Added".to_string(),
+                        text: text.to_string(),
+                    });
+                }
+            }
+        }
+
+        if items.is_empty() {
+            return Vec::new();
+        }
+
+        let version = tag_name
+            .trim_start_matches('v')
+            .trim_start_matches("rust-v")
+            .to_string();
+
+        vec![Release { version, items }]
+    }
+
     /// Returns the current release data.
     fn get_data(&self) -> Option<ReleasesData> {
         self.data.read().ok().and_then(|guard| guard.clone())
@@ -405,6 +532,7 @@ impl NewsModule {
         name: &str,
         icon: &str,
         releases: Vec<Release>,
+        column_width: Option<f32>,
     ) -> gpui::Div {
         let name_str: SharedString = name.to_string().into();
         let icon_str: SharedString = icon.to_string().into();
@@ -412,7 +540,6 @@ impl NewsModule {
         let mut column = div()
             .flex()
             .flex_col()
-            .flex_1()
             .min_w(px(0.0))
             .overflow_hidden()
             .gap(px(8.0))
@@ -440,6 +567,12 @@ impl NewsModule {
                             .child(name_str),
                     ),
             );
+
+        if let Some(width) = column_width {
+            column = column.w(px(width)).flex_none();
+        } else {
+            column = column.flex_1();
+        }
 
         if releases.is_empty() {
             return column.child(
@@ -599,12 +732,75 @@ impl GpuiModule for NewsModule {
             );
 
         if let Some(data) = news_data {
-            let columns = div().flex().flex_row().gap(px(12.0)).w_full().children(
-                data.sources.into_iter().map(|(source, releases)| {
-                    self.render_source_column(theme, &source.name, source.icon, releases)
-                }),
-            );
-            container = container.child(columns);
+            if std::env::var("RUSTYBAR_TRACE_POPUP").is_ok() {
+                if let Ok(mut file) = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open("/tmp/rustybar_popup_trace.log")
+                {
+                    let panel_width = crate::gpui_app::popup_manager::panel_width();
+                    let _ = writeln!(
+                        file,
+                        "{} news layout panel_width={:.1} sources={}",
+                        chrono::Utc::now().to_rfc3339(),
+                        panel_width,
+                        data.sources.len()
+                    );
+                }
+            }
+            let mut iter = data.sources.into_iter();
+            let first_row = iter.by_ref().take(3).collect::<Vec<_>>();
+            let second_row = iter.by_ref().take(1).collect::<Vec<_>>();
+
+            let row = |items: Vec<(ReleaseSource, Vec<Release>)>| {
+                div()
+                    .flex()
+                    .flex_row()
+                    .gap(px(12.0))
+                    .w_full()
+                    .children(items.into_iter().map(|(source, releases)| {
+                        self.render_source_column(theme, &source.name, source.icon, releases, None)
+                    }))
+            };
+
+            container = container.child(row(first_row));
+            if !second_row.is_empty() {
+                let panel_width = crate::gpui_app::popup_manager::panel_width();
+                let row_width = panel_width - 32.0;
+                let column_width = ((row_width - (12.0 * 2.0)) / 3.0).max(180.0);
+                if std::env::var("RUSTYBAR_TRACE_POPUP").is_ok() {
+                    if let Ok(mut file) = std::fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open("/tmp/rustybar_popup_trace.log")
+                    {
+                        let _ = writeln!(
+                            file,
+                            "{} news layout row_width={:.1} column_width={:.1}",
+                            chrono::Utc::now().to_rfc3339(),
+                            row_width,
+                            column_width
+                        );
+                    }
+                }
+                let (source, releases) = second_row[0].clone();
+                let single = self.render_source_column(
+                    theme,
+                    &source.name,
+                    source.icon,
+                    releases,
+                    Some(column_width as f32),
+                );
+                container = container.child(
+                    div()
+                        .flex()
+                        .flex_row()
+                        .gap(px(12.0))
+                        .w_full()
+                        .child(single)
+                        .child(div().flex_grow()),
+                );
+            }
         } else {
             container = container.child(
                 div()

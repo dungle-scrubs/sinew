@@ -94,7 +94,7 @@ pub fn run() {
 
         // Create the panel window (hidden by default)
         let theme = theme::Theme::from_config(&config.bar);
-        let panel_height = 280.0; // Compact height for news
+        let panel_height = 300.0; // Initial height, PanelView will resize based on content
         let panel_width = screen_width;
         let panel_x = screen_x;
 
@@ -160,7 +160,7 @@ fn create_panel_window(
                 window_background: gpui::WindowBackgroundAppearance::Opaque,
                 ..Default::default()
             },
-            |_window, cx| cx.new(|_cx| panel::PanelView::new(theme)),
+            |_window, cx| cx.new(|cx| panel::PanelView::new(theme, cx)),
         )
         .expect("Failed to create panel window");
 

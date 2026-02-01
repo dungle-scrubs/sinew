@@ -106,10 +106,12 @@ pub struct ModuleStyle {
 /// Popup configuration for a module.
 #[derive(Debug, Clone, Default)]
 pub struct PopupConfig {
-    /// Popup type: "calendar", "info", "script", "panel"
+    /// Popup type: "calendar", "info", "script", "demo", "news", "panel"
     pub popup_type: Option<String>,
     /// Popup width
     pub width: f32,
+    /// Popup height in pixels (for panel-type popups)
+    pub height: f32,
     /// Maximum height as percentage of available space (0-100)
     pub max_height_percent: f32,
     /// Command for script-type popup
@@ -302,6 +304,7 @@ pub fn create_module(config: &ModuleConfig, index: usize) -> Option<PositionedMo
         PopupConfig {
             popup_type: Some(popup_type.clone()),
             width: config.popup_width.unwrap_or(200.0) as f32,
+            height: config.popup_height.unwrap_or(280.0) as f32,
             max_height_percent: config.popup_max_height.unwrap_or(50.0).clamp(0.0, 100.0) as f32,
             command: config.popup_command.clone(),
             anchor,

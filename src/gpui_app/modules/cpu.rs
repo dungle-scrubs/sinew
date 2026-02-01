@@ -1,6 +1,9 @@
 //! CPU module for displaying CPU usage.
 
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
 
 use gpui::{div, prelude::*, px, AnyElement, SharedString, Styled};
 
@@ -12,23 +15,42 @@ pub struct CpuModule {
     id: String,
     label: Option<String>,
     label_align: LabelAlign,
-    usage: u8,
+    usage: Arc<AtomicU8>,
+    dirty: Arc<AtomicBool>,
 }
 
 impl CpuModule {
     /// Creates a new CPU module.
     pub fn new(id: &str, label: Option<&str>, label_align: LabelAlign) -> Self {
-        let mut module = Self {
+        let initial = Self::fetch_usage();
+        let usage = Arc::new(AtomicU8::new(initial));
+        let dirty = Arc::new(AtomicBool::new(true));
+
+        let usage_handle = Arc::clone(&usage);
+        let dirty_handle = Arc::clone(&dirty);
+        std::thread::spawn(move || {
+            let mut last = usage_handle.load(Ordering::Relaxed);
+            loop {
+                let next = Self::fetch_usage();
+                if next != last {
+                    usage_handle.store(next, Ordering::Relaxed);
+                    dirty_handle.store(true, Ordering::Relaxed);
+                    last = next;
+                }
+                std::thread::sleep(Duration::from_secs(1));
+            }
+        });
+
+        Self {
             id: id.to_string(),
             label: label.map(|s| s.to_string()),
             label_align,
-            usage: 0,
-        };
-        module.fetch_status();
-        module
+            usage,
+            dirty,
+        }
     }
 
-    fn fetch_status(&mut self) {
+    fn fetch_usage() -> u8 {
         let output = Command::new("sh")
             .args([
                 "-c",
@@ -38,9 +60,10 @@ impl CpuModule {
             .ok()
             .and_then(|o| String::from_utf8(o.stdout).ok());
 
-        if let Some(usage) = output.and_then(|s| s.trim().parse::<f32>().ok()) {
-            self.usage = usage.round() as u8;
-        }
+        output
+            .and_then(|s| s.trim().parse::<f32>().ok())
+            .map(|v| v.round() as u8)
+            .unwrap_or(0)
     }
 }
 
@@ -50,7 +73,8 @@ impl GpuiModule for CpuModule {
     }
 
     fn render(&self, theme: &Theme) -> AnyElement {
-        let text = format!("{}%", self.usage);
+        let usage = self.usage.load(Ordering::Relaxed);
+        let text = format!("{}%", usage);
 
         if let Some(ref label) = self.label {
             // Two-line layout with label - configurable alignment
@@ -97,12 +121,11 @@ impl GpuiModule for CpuModule {
     }
 
     fn update(&mut self) -> bool {
-        let old_usage = self.usage;
-        self.fetch_status();
-        old_usage != self.usage
+        self.dirty.swap(false, Ordering::Relaxed)
     }
 
     fn value(&self) -> Option<u8> {
-        Some(100 - self.usage) // Invert so low CPU is "good"
+        let usage = self.usage.load(Ordering::Relaxed);
+        Some(100 - usage) // Invert so low CPU is "good"
     }
 }

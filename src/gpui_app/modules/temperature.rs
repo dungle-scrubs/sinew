@@ -1,6 +1,9 @@
 //! Temperature module for displaying CPU temperature.
 
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
 
 use gpui::{div, prelude::*, px, AnyElement, SharedString, Styled};
 
@@ -12,39 +15,52 @@ pub struct TemperatureModule {
     id: String,
     label: Option<String>,
     label_align: LabelAlign,
-    temp_celsius: u8,
+    temp_celsius: Arc<AtomicU8>,
+    dirty: Arc<AtomicBool>,
 }
 
 impl TemperatureModule {
     /// Creates a new temperature module.
     pub fn new(id: &str, label: Option<&str>, label_align: LabelAlign) -> Self {
-        let mut module = Self {
+        let initial = Self::fetch_temperature();
+        let temp_celsius = Arc::new(AtomicU8::new(initial));
+        let dirty = Arc::new(AtomicBool::new(true));
+
+        let temp_handle = Arc::clone(&temp_celsius);
+        let dirty_handle = Arc::clone(&dirty);
+        std::thread::spawn(move || {
+            let mut last = temp_handle.load(Ordering::Relaxed);
+            loop {
+                let next = Self::fetch_temperature();
+                if next != last {
+                    temp_handle.store(next, Ordering::Relaxed);
+                    dirty_handle.store(true, Ordering::Relaxed);
+                    last = next;
+                }
+                std::thread::sleep(Duration::from_secs(1));
+            }
+        });
+
+        Self {
             id: id.to_string(),
             label: label.map(|s| s.to_string()),
             label_align,
-            temp_celsius: 0,
-        };
-        module.fetch_temperature();
-        module
+            temp_celsius,
+            dirty,
+        }
     }
 
-    fn fetch_temperature(&mut self) {
+    fn fetch_temperature() -> u8 {
         // Try multiple methods to get CPU temperature on macOS
-
-        // Method 1: Use smctemp (works on Apple Silicon - brew install narugit/smctemp/smctemp)
         if let Some(temp) = Self::try_smctemp() {
-            self.temp_celsius = temp;
-            return;
+            return temp;
         }
 
-        // Method 2: Use osx-cpu-temp if available (works on Intel - brew install osx-cpu-temp)
         if let Some(temp) = Self::try_osx_cpu_temp() {
-            self.temp_celsius = temp;
-            return;
+            return temp;
         }
 
-        // Fallback: temperature unknown
-        self.temp_celsius = 0;
+        0
     }
 
     fn try_smctemp() -> Option<u8> {
@@ -98,8 +114,9 @@ impl GpuiModule for TemperatureModule {
     }
 
     fn render(&self, theme: &Theme) -> AnyElement {
-        let text = if self.temp_celsius > 0 {
-            format!("{}°", self.temp_celsius)
+        let temp = self.temp_celsius.load(Ordering::Relaxed);
+        let text = if temp > 0 {
+            format!("{}°", temp)
         } else {
             "—".to_string()
         };
@@ -149,19 +166,18 @@ impl GpuiModule for TemperatureModule {
     }
 
     fn update(&mut self) -> bool {
-        let old_temp = self.temp_celsius;
-        self.fetch_temperature();
-        old_temp != self.temp_celsius
+        self.dirty.swap(false, Ordering::Relaxed)
     }
 
     fn value(&self) -> Option<u8> {
         // Return inverted value for threshold coloring
         // Lower temp is "good" (high value), higher temp is "bad" (low value)
         // Map 30-100°C range to 100-0 value
-        if self.temp_celsius == 0 {
+        let temp = self.temp_celsius.load(Ordering::Relaxed);
+        if temp == 0 {
             return None;
         }
-        let normalized = ((100.0 - self.temp_celsius as f32) / 70.0 * 100.0).clamp(0.0, 100.0);
+        let normalized = ((100.0 - temp as f32) / 70.0 * 100.0).clamp(0.0, 100.0);
         Some(normalized as u8)
     }
 }

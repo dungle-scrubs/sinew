@@ -1,12 +1,14 @@
 //! GPUI bar view implementation.
 
 use gpui::{
-    div, prelude::*, px, Context, MouseButton, ParentElement, Rgba, Styled, Task, WeakEntity,
-    Window,
+    div, prelude::*, px, Context, MouseButton, ParentElement, Styled, Task, WeakEntity, Window,
 };
+use objc2_app_kit::NSEvent;
+use std::io::Write;
 use std::process::Command;
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::OnceLock;
 use std::sync::RwLock;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -24,6 +26,15 @@ static REFRESH_TASK_STARTED: AtomicBool = AtomicBool::new(false);
 
 /// Flag to ensure workspace observer is only set up once
 static WORKSPACE_OBSERVER_STARTED: AtomicBool = AtomicBool::new(false);
+
+static AUTO_POPUP_DONE: AtomicBool = AtomicBool::new(false);
+
+fn auto_popup_id() -> Option<String> {
+    static AUTO_POPUP_ID: OnceLock<Option<String>> = OnceLock::new();
+    AUTO_POPUP_ID
+        .get_or_init(|| std::env::var("RUSTYBAR_AUTO_POPUP").ok())
+        .clone()
+}
 
 /// Flag set when active application changes (checked by refresh task)
 static APP_CHANGED: AtomicBool = AtomicBool::new(false);
@@ -224,32 +235,6 @@ impl BarView {
         (left_outer, left_inner, right_outer, right_inner)
     }
 
-    /// Updates all modules and returns true if any changed.
-    fn update_modules(&mut self) -> bool {
-        let mut changed = false;
-        for pm in &mut self.left_outer_modules {
-            if pm.module.update() {
-                changed = true;
-            }
-        }
-        for pm in &mut self.left_inner_modules {
-            if pm.module.update() {
-                changed = true;
-            }
-        }
-        for pm in &mut self.right_outer_modules {
-            if pm.module.update() {
-                changed = true;
-            }
-        }
-        for pm in &mut self.right_inner_modules {
-            if pm.module.update() {
-                changed = true;
-            }
-        }
-        changed
-    }
-
     /// Checks for config changes and rebuilds modules if needed.
     fn check_config_reload(&mut self) -> bool {
         if let Some(ref watcher) = self.config_watcher {
@@ -277,32 +262,98 @@ impl BarView {
         false
     }
 
-    /// Gets the effective text color for a module, considering thresholds.
-    fn get_module_text_color(&self, pm: &PositionedModule) -> Rgba {
-        if let Some(value) = pm.module.value() {
-            // Check thresholds (value is 0-100, lower is worse for battery-like modules)
-            if value < pm.style.critical_threshold as u8 {
-                if let Some(color) = pm.style.critical_color {
-                    return color;
-                }
-                return self.theme.destructive;
+    /// Updates all modules and returns true if any changed.
+    fn update_modules(&mut self) -> bool {
+        let mut changed = false;
+        for pm in &mut self.left_outer_modules {
+            let start = Instant::now();
+            if pm.module.update() {
+                changed = true;
             }
-            if value < pm.style.warning_threshold as u8 {
-                if let Some(color) = pm.style.warning_color {
-                    return color;
+            let took = start.elapsed();
+            if std::env::var("RUSTYBAR_TRACE_POPUP").is_ok() && took > Duration::from_millis(20) {
+                if let Ok(mut file) = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open("/tmp/rustybar_popup_trace.log")
+                {
+                    let _ = writeln!(
+                        file,
+                        "{} bar update module='{}' took={:?}",
+                        chrono::Utc::now().to_rfc3339(),
+                        pm.module.id(),
+                        took
+                    );
                 }
-                return self.theme.warning;
             }
         }
-
-        // Check toggle active state
-        if pm.toggle_enabled && pm.toggle_active {
-            if let Some(color) = pm.style.active_text_color {
-                return color;
+        for pm in &mut self.left_inner_modules {
+            let start = Instant::now();
+            if pm.module.update() {
+                changed = true;
+            }
+            let took = start.elapsed();
+            if std::env::var("RUSTYBAR_TRACE_POPUP").is_ok() && took > Duration::from_millis(20) {
+                if let Ok(mut file) = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open("/tmp/rustybar_popup_trace.log")
+                {
+                    let _ = writeln!(
+                        file,
+                        "{} bar update module='{}' took={:?}",
+                        chrono::Utc::now().to_rfc3339(),
+                        pm.module.id(),
+                        took
+                    );
+                }
             }
         }
-
-        self.theme.foreground
+        for pm in &mut self.right_outer_modules {
+            let start = Instant::now();
+            if pm.module.update() {
+                changed = true;
+            }
+            let took = start.elapsed();
+            if std::env::var("RUSTYBAR_TRACE_POPUP").is_ok() && took > Duration::from_millis(20) {
+                if let Ok(mut file) = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open("/tmp/rustybar_popup_trace.log")
+                {
+                    let _ = writeln!(
+                        file,
+                        "{} bar update module='{}' took={:?}",
+                        chrono::Utc::now().to_rfc3339(),
+                        pm.module.id(),
+                        took
+                    );
+                }
+            }
+        }
+        for pm in &mut self.right_inner_modules {
+            let start = Instant::now();
+            if pm.module.update() {
+                changed = true;
+            }
+            let took = start.elapsed();
+            if std::env::var("RUSTYBAR_TRACE_POPUP").is_ok() && took > Duration::from_millis(20) {
+                if let Ok(mut file) = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open("/tmp/rustybar_popup_trace.log")
+                {
+                    let _ = writeln!(
+                        file,
+                        "{} bar update module='{}' took={:?}",
+                        chrono::Utc::now().to_rfc3339(),
+                        pm.module.id(),
+                        took
+                    );
+                }
+            }
+        }
+        changed
     }
 
     /// Renders a single module with its styling.
@@ -353,11 +404,45 @@ impl BarView {
         // Add click handler for popup or command
         if let Some(ref popup_cfg) = pm.popup {
             let popup_type = popup_cfg.popup_type.clone();
-            wrapper = wrapper.on_mouse_down(MouseButton::Left, move |_event, _window, _cx| {
+            wrapper = wrapper.on_mouse_down(MouseButton::Left, move |event, window, _cx| {
                 // Use extension-based popup toggle
                 let extension_id = popup_type.as_deref().unwrap_or("demo");
                 log::info!("Module clicked, toggling extension popup: {}", extension_id);
+                if std::env::var("RUSTYBAR_TRACE_POPUP").is_ok() {
+                    if let Ok(mut file) = std::fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open("/tmp/rustybar_popup_trace.log")
+                    {
+                        let mouse_pos = NSEvent::mouseLocation();
+                        let bounds = window.bounds();
+                        let click_x: f64 = (bounds.origin.x + event.position.x).into();
+                        let click_y: f64 = (bounds.origin.y + event.position.y).into();
+                        let global_delay = crate::gpui_app::popup_manager::global_click_delay_ms()
+                            .map(|v| v as i64)
+                            .unwrap_or(-1);
+                        let _ = writeln!(
+                            file,
+                            "{} bar click -> toggle '{}' mouse=({:.1},{:.1}) click=({:.1},{:.1}) win_origin=({:.1},{:.1}) global_delay_ms={}",
+                            chrono::Utc::now().to_rfc3339(),
+                            extension_id,
+                            mouse_pos.x,
+                            mouse_pos.y,
+                            click_x,
+                            click_y,
+                            f64::from(bounds.origin.x),
+                            f64::from(bounds.origin.y),
+                            global_delay
+                        );
+                    }
+                }
+                let bounds = window.bounds();
+                let click_x: f64 = (bounds.origin.x + event.position.x).into();
+                let click_y: f64 = (bounds.origin.y + event.position.y).into();
+                crate::gpui_app::popup_manager::record_popup_anchor(click_x, click_y);
+                crate::gpui_app::popup_manager::record_popup_click(extension_id);
                 crate::gpui_app::popup_manager::toggle_popup(extension_id);
+                crate::gpui_app::refresh_popup_windows(_cx);
             });
         } else if let Some(ref cmd) = pm.click_command {
             let command = cmd.clone();
@@ -392,15 +477,44 @@ impl Render for BarView {
         // This uses GPUI's async executor to periodically check camera state
         self.start_refresh_task(cx);
 
+        if !AUTO_POPUP_DONE.load(Ordering::SeqCst) {
+            if let Some(module_id) = auto_popup_id() {
+                log::info!("Auto-opening popup for module '{}'", module_id);
+                crate::gpui_app::popup_manager::toggle_popup(&module_id);
+                AUTO_POPUP_DONE.store(true, Ordering::SeqCst);
+            }
+        }
+
         // Check for config changes and rebuild if needed
         if self.check_config_reload() {
             cx.notify();
         }
 
-        // Update modules periodically (rate-limited to every 500ms)
-        if self.last_update.elapsed() > self.update_interval {
+        // Update modules periodically (rate-limited to every 500ms).
+        // Skip updates while a popup is visible to keep the UI responsive.
+        if self.last_update.elapsed() > self.update_interval
+            && !crate::gpui_app::popup_manager::is_popup_visible()
+        {
+            let update_start = Instant::now();
             if self.update_modules() {
                 cx.notify(); // Trigger re-render if any module changed
+            }
+            let update_took = update_start.elapsed();
+            if std::env::var("RUSTYBAR_TRACE_POPUP").is_ok()
+                && update_took > Duration::from_millis(20)
+            {
+                if let Ok(mut file) = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open("/tmp/rustybar_popup_trace.log")
+                {
+                    let _ = writeln!(
+                        file,
+                        "{} bar update batch took={:?}",
+                        chrono::Utc::now().to_rfc3339(),
+                        update_took
+                    );
+                }
             }
             self.last_update = Instant::now();
         }

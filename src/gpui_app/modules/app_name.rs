@@ -1,6 +1,9 @@
 //! App name module for displaying the frontmost application.
 
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use gpui::{div, prelude::*, px, AnyElement, SharedString, Styled};
 
@@ -11,22 +14,43 @@ use crate::gpui_app::theme::Theme;
 pub struct AppNameModule {
     id: String,
     max_length: usize,
-    name: String,
+    name: Arc<Mutex<String>>,
+    dirty: Arc<AtomicBool>,
 }
 
 impl AppNameModule {
     /// Creates a new app name module.
     pub fn new(id: &str, max_length: usize) -> Self {
-        let mut module = Self {
+        let initial = Self::fetch_name(max_length);
+        let name = Arc::new(Mutex::new(initial));
+        let dirty = Arc::new(AtomicBool::new(true));
+
+        let name_handle = Arc::clone(&name);
+        let dirty_handle = Arc::clone(&dirty);
+        std::thread::spawn(move || {
+            let mut last = String::new();
+            loop {
+                let next = Self::fetch_name(max_length);
+                if next != last {
+                    if let Ok(mut guard) = name_handle.lock() {
+                        *guard = next.clone();
+                    }
+                    dirty_handle.store(true, Ordering::Relaxed);
+                    last = next;
+                }
+                std::thread::sleep(Duration::from_secs(1));
+            }
+        });
+
+        Self {
             id: id.to_string(),
             max_length,
-            name: String::new(),
-        };
-        module.fetch_status();
-        module
+            name,
+            dirty,
+        }
     }
 
-    fn fetch_status(&mut self) {
+    fn fetch_name(max_length: usize) -> String {
         // Get the display name from the application bundle (e.g., "WezTerm" instead of "wezterm-gui")
         let output = Command::new("osascript")
             .args([
@@ -40,8 +64,9 @@ impl AppNameModule {
         if let Some(name) = output {
             // Remove .app suffix if present
             let name = name.trim().strip_suffix(".app").unwrap_or(name.trim());
-            self.name = truncate_text(name, self.max_length);
+            return truncate_text(name, max_length);
         }
+        String::new()
     }
 }
 
@@ -51,18 +76,17 @@ impl GpuiModule for AppNameModule {
     }
 
     fn render(&self, theme: &Theme) -> AnyElement {
+        let name = self.name.lock().map(|n| n.clone()).unwrap_or_default();
         div()
             .flex()
             .items_center()
             .text_color(theme.foreground)
             .text_size(px(theme.font_size))
-            .child(SharedString::from(self.name.clone()))
+            .child(SharedString::from(name))
             .into_any_element()
     }
 
     fn update(&mut self) -> bool {
-        let old_name = self.name.clone();
-        self.fetch_status();
-        old_name != self.name
+        self.dirty.swap(false, Ordering::Relaxed)
     }
 }

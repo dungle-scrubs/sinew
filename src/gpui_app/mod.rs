@@ -15,6 +15,7 @@ use gpui::{
     point, px, size, App, AppContext, Application, Bounds, WindowBounds, WindowKind, WindowOptions,
 };
 use objc2::MainThreadMarker;
+use std::sync::{Mutex, OnceLock};
 
 pub use bar::BarView;
 
@@ -65,7 +66,7 @@ pub fn run() {
         create_bar_window(cx, mtm, screen_x, macos_y, screen_width, bar_height);
 
         // Create the panel window (hidden by default)
-        let panel_height = 300.0; // Initial height, PopupHostView will resize based on content
+        let panel_height = 500.0; // Max panel height, will resize based on content
         let panel_width = screen_width;
         let panel_x = screen_x;
 
@@ -82,7 +83,7 @@ pub fn run() {
         // Create the calendar popup window (hidden by default)
         // Height will be determined by the calendar extension
         let popup_width = 280.0;
-        let popup_height = 520.0; // Initial estimate, will resize
+        let popup_height = 720.0; // Initial estimate, will resize
         let popup_x = screen_x + screen_width - popup_width - 80.0;
 
         create_popup_window(cx, mtm, popup_x, macos_y, popup_width, popup_height, theme);
@@ -90,8 +91,35 @@ pub fn run() {
         // Hide all popups immediately after creation
         popup_manager::hide_popups_on_create();
 
+        // Warm up popup rendering to avoid first-open latency.
+        popup_manager::warmup_popups();
+
         log::info!("GPUI app initialization complete");
     });
+}
+
+static PANEL_WINDOW_HANDLE: OnceLock<Mutex<Option<gpui::WindowHandle<modules::PopupHostView>>>> =
+    OnceLock::new();
+static POPUP_WINDOW_HANDLE: OnceLock<Mutex<Option<gpui::WindowHandle<modules::PopupHostView>>>> =
+    OnceLock::new();
+
+pub fn refresh_popup_windows<C: AppContext>(cx: &mut C) {
+    if let Some(lock) = PANEL_WINDOW_HANDLE.get() {
+        if let Ok(Some(handle)) = lock.lock().map(|g| g.clone()) {
+            let _ = handle.update(cx, |_view, window, cx| {
+                window.refresh();
+                cx.notify();
+            });
+        }
+    }
+    if let Some(lock) = POPUP_WINDOW_HANDLE.get() {
+        if let Ok(Some(handle)) = lock.lock().map(|g| g.clone()) {
+            let _ = handle.update(cx, |_view, window, cx| {
+                window.refresh();
+                cx.notify();
+            });
+        }
+    }
 }
 
 fn create_panel_window(
@@ -132,12 +160,25 @@ fn create_panel_window(
         )
         .expect("Failed to create panel window");
 
+    {
+        let lock = PANEL_WINDOW_HANDLE.get_or_init(|| Mutex::new(None));
+        if let Ok(mut guard) = lock.lock() {
+            *guard = Some(window.clone());
+        }
+    }
+
     // Configure panel window position
     window
         .update(cx, |_, _window, _cx| {
             configure_panel_window(mtm, x, macos_y, width, height);
         })
         .ok();
+
+    // In case a popup was requested before windows existed, retry showing now.
+    popup_manager::execute_pending_show();
+
+    // Warm up the panel window to avoid first-open latency.
+    refresh_popup_windows(cx);
 }
 
 /// Configure the panel window
@@ -160,6 +201,8 @@ fn configure_panel_window(mtm: MainThreadMarker, x: f64, bar_y: f64, width: f64,
             // Match by size (panel is taller than bar)
             if frame.size.height > 100.0 {
                 ns_window.setStyleMask(NSWindowStyleMask::Borderless);
+
+                crate::gpui_app::popup_manager::register_window_observers(&ns_window, "panel");
 
                 let new_frame = NSRect::new(
                     objc2_foundation::NSPoint::new(x, panel_y),
@@ -219,18 +262,31 @@ fn create_popup_window(
                 is_movable: false,
                 focus: false,
                 show: true,
-                window_background: gpui::WindowBackgroundAppearance::Transparent,
+                window_background: gpui::WindowBackgroundAppearance::Opaque,
                 ..Default::default()
             },
             |_window, cx| cx.new(|cx| modules::PopupHostView::popup(theme, cx)),
         )
         .expect("Failed to create popup window");
 
+    {
+        let lock = POPUP_WINDOW_HANDLE.get_or_init(|| Mutex::new(None));
+        if let Ok(mut guard) = lock.lock() {
+            *guard = Some(window.clone());
+        }
+    }
+
     window
         .update(cx, |_, _window, _cx| {
             configure_popup_window(mtm, x, macos_y, width, height);
         })
         .ok();
+
+    // In case a popup was requested before windows existed, retry showing now.
+    popup_manager::execute_pending_show();
+
+    // Warm up the popup window to avoid first-open latency.
+    refresh_popup_windows(cx);
 }
 
 fn configure_popup_window(mtm: MainThreadMarker, x: f64, bar_y: f64, width: f64, height: f64) {
@@ -264,6 +320,8 @@ fn configure_popup_window(mtm: MainThreadMarker, x: f64, bar_y: f64, width: f64,
             if frame.size.width > 200.0 && frame.size.width < 500.0 && frame.size.height > 200.0 {
                 ns_window.setStyleMask(NSWindowStyleMask::Borderless);
 
+                crate::gpui_app::popup_manager::register_window_observers(&ns_window, "popup");
+
                 let new_frame = NSRect::new(
                     objc2_foundation::NSPoint::new(x, popup_y),
                     objc2_foundation::NSSize::new(width, height),
@@ -273,8 +331,15 @@ fn configure_popup_window(mtm: MainThreadMarker, x: f64, bar_y: f64, width: f64,
                 let _: () = objc2::msg_send![&ns_window, setLevel: MENU_BAR_WINDOW_LEVEL];
 
                 ns_window.setHasShadow(false); // No shadow - popup extends from bar
-                ns_window.setOpaque(false); // Transparent for rounded corners
-                ns_window.setBackgroundColor(None); // Clear background
+                ns_window.setOpaque(true);
+                use objc2_app_kit::NSColor;
+                let bg_color = NSColor::colorWithSRGBRed_green_blue_alpha(
+                    30.0 / 255.0,
+                    30.0 / 255.0,
+                    46.0 / 255.0,
+                    1.0,
+                );
+                ns_window.setBackgroundColor(Some(&bg_color));
                 ns_window.setIgnoresMouseEvents(false);
 
                 log::info!(

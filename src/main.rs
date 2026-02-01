@@ -61,10 +61,29 @@ fn main() {
         }
     }
 
-    // Initialize logging
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    // Initialize logging (flush each line for interactive debugging).
+    let mut logger =
+        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"));
+    logger
+        .format(|buf, record| {
+            use std::io::Write;
+            writeln!(
+                buf,
+                "[{} {:>5} {}] {}",
+                chrono::Utc::now().to_rfc3339(),
+                record.level(),
+                record.target(),
+                record.args()
+            )?;
+            buf.flush()
+        })
+        .init();
 
     log::info!("Starting RustyBar v{}", VERSION);
+
+    if std::env::var("RUSTYBAR_TRACE_POPUP").is_ok() {
+        let _ = std::fs::write("/tmp/rustybar_popup_trace.log", "");
+    }
 
     // Run the GPUI-based application
     gpui_app::run();

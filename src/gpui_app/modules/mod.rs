@@ -123,6 +123,18 @@ pub enum PopupEvent {
     Scroll { delta_x: f32, delta_y: f32 },
 }
 
+/// Actions triggered from popup UI controls.
+#[derive(Debug, Clone)]
+pub enum PopupAction {
+    Prev,
+    Next,
+    Today,
+    Reset,
+    DragStart,
+    DragEnd,
+    SliderSet { value: f32 },
+}
+
 /// Trait for GPUI-based bar modules.
 ///
 /// Modules can optionally provide popup content by implementing popup_spec() and render_popup().
@@ -163,6 +175,9 @@ pub trait GpuiModule: Send + Sync {
 
     /// Handles popup lifecycle events.
     fn on_popup_event(&mut self, _event: PopupEvent) {}
+
+    /// Handles popup UI actions.
+    fn on_popup_action(&mut self, _action: PopupAction) {}
 }
 
 /// Module styling options.
@@ -494,6 +509,13 @@ impl Default for ModuleRegistry {
 /// Global module registry for popup-capable modules.
 static MODULE_REGISTRY: RwLock<Option<ModuleRegistry>> = RwLock::new(None);
 
+#[cfg(test)]
+pub fn set_module_registry_for_test(registry: ModuleRegistry) {
+    if let Ok(mut global) = MODULE_REGISTRY.write() {
+        *global = Some(registry);
+    }
+}
+
 /// Initializes the global module registry with popup-capable modules.
 pub fn init_modules(theme: &Theme) {
     let mut registry = ModuleRegistry::new();
@@ -521,6 +543,14 @@ pub fn get_module(id: &str) -> Option<Arc<RwLock<dyn GpuiModule>>> {
         .and_then(|guard| guard.as_ref().and_then(|r| r.get(id)));
     log::debug!("get_module('{}') -> found={}", id, result.is_some());
     result
+}
+
+pub fn dispatch_popup_action(module_id: &str, action: PopupAction) {
+    if let Some(module) = get_module(module_id) {
+        if let Ok(mut guard) = module.write() {
+            guard.on_popup_action(action);
+        }
+    }
 }
 
 /// Gets the popup spec for a module.

@@ -5,9 +5,13 @@
 //! - Popup: Calendar grid + timezone list with time scrubbing
 
 use chrono::{Datelike, Duration, FixedOffset, Local, NaiveDate, Timelike, Utc};
-use gpui::{div, prelude::*, px, AnyElement, ParentElement, SharedString, Styled};
+use gpui::{div, prelude::*, px, AnyElement, MouseButton, ParentElement, SharedString, Styled};
+use std::io::Write;
 
-use super::{GpuiModule, PopupAnchor, PopupEvent, PopupSpec, PopupType};
+use super::{
+    dispatch_popup_action, GpuiModule, PopupAction, PopupAnchor, PopupEvent, PopupSpec, PopupType,
+};
+use crate::gpui_app::popup_manager::notify_popup_needs_render;
 use crate::gpui_app::primitives::{render_slider, SliderStyle};
 use crate::gpui_app::theme::Theme;
 
@@ -24,6 +28,10 @@ pub const TIMEZONES: &[(&str, &str, i32)] = &[
 
 /// Maximum time offset in minutes (12 hours each direction)
 const MAX_TIME_OFFSET_MINUTES: i32 = 12 * 60;
+const CALENDAR_MAX_POPUP_HEIGHT: f64 = 720.0;
+const CALENDAR_POPUP_WIDTH: f32 = 280.0;
+const TIMEZONE_PADDING_X: f32 = 12.0;
+const SLIDER_WIDTH: f32 = 232.0;
 
 /// Calendar module providing datetime bar item and calendar/timezone popup.
 pub struct CalendarModule {
@@ -44,7 +52,6 @@ pub struct CalendarModule {
     // For double-click reset
     last_click: Option<std::time::Instant>,
     // Flag to reset time on popup open
-    needs_reset: bool,
 }
 
 impl CalendarModule {
@@ -69,12 +76,16 @@ impl CalendarModule {
             drag_start_x: 0.0,
             drag_start_offset: 0,
             last_click: None,
-            needs_reset: false,
         }
     }
 
     /// Calculates the popup height based on current month's week count.
     pub fn calculate_height(&self) -> f64 {
+        let (_, _, _, popup_height) = self.layout_metrics();
+        popup_height
+    }
+
+    fn layout_metrics(&self) -> (f64, f64, f64, f64) {
         let year = self.displayed_year;
         let month = self.displayed_month;
 
@@ -97,7 +108,19 @@ impl CalendarModule {
         let timezone_count = TIMEZONES.len() as f64;
         let timezones = 70.0 + (timezone_count * 50.0);
         // Total with border
-        calendar + timezones + 2.0
+        let total = calendar + timezones + 2.0;
+        let popup_height = total.min(CALENDAR_MAX_POPUP_HEIGHT);
+        (calendar, timezones, total, popup_height)
+    }
+
+    fn from_slider_value(value: f32) -> i32 {
+        let normalized = value.clamp(0.0, 1.0);
+        let raw = ((normalized * 2.0) - 1.0) * MAX_TIME_OFFSET_MINUTES as f32;
+        Self::snap_offset_to_clock_boundary(raw.round() as i32)
+    }
+
+    fn set_offset(&mut self, minutes: i32) {
+        self.offset_minutes = minutes.clamp(-MAX_TIME_OFFSET_MINUTES, MAX_TIME_OFFSET_MINUTES);
     }
 
     /// Resets the time offset and scrolls to today.
@@ -203,6 +226,7 @@ impl CalendarModule {
                 .flex_row()
                 .items_center()
                 .justify_between()
+                .h(px(44.0))
                 .py(px(8.0))
                 .px(px(8.0))
                 .child(
@@ -216,6 +240,10 @@ impl CalendarModule {
                         .rounded(px(4.0))
                         .cursor_pointer()
                         .hover(|s| s.bg(nav_button_style))
+                        .on_mouse_down(MouseButton::Left, move |_event, _window, _cx| {
+                            dispatch_popup_action("calendar", PopupAction::Prev);
+                            notify_popup_needs_render("calendar");
+                        })
                         .text_color(text_color)
                         .text_size(px(14.0))
                         .child(SharedString::from("◀")),
@@ -228,6 +256,10 @@ impl CalendarModule {
                         .rounded(px(4.0))
                         .cursor_pointer()
                         .hover(|s| s.bg(nav_button_style))
+                        .on_mouse_down(MouseButton::Left, move |_event, _window, _cx| {
+                            dispatch_popup_action("calendar", PopupAction::Today);
+                            notify_popup_needs_render("calendar");
+                        })
                         .text_color(text_color)
                         .text_size(px(16.0))
                         .font_weight(gpui::FontWeight::SEMIBOLD)
@@ -244,6 +276,10 @@ impl CalendarModule {
                         .rounded(px(4.0))
                         .cursor_pointer()
                         .hover(|s| s.bg(nav_button_style))
+                        .on_mouse_down(MouseButton::Left, move |_event, _window, _cx| {
+                            dispatch_popup_action("calendar", PopupAction::Next);
+                            notify_popup_needs_render("calendar");
+                        })
                         .text_color(text_color)
                         .text_size(px(14.0))
                         .child(SharedString::from("▶")),
@@ -258,6 +294,7 @@ impl CalendarModule {
                 .flex()
                 .flex_row()
                 .justify_between()
+                .h(px(20.0))
                 .px(px(8.0))
                 .children(weekdays.iter().map(|day| {
                     div()
@@ -318,6 +355,7 @@ impl CalendarModule {
                     .flex()
                     .flex_row()
                     .justify_between()
+                    .h(px(42.0))
                     .px(px(8.0))
                     .py(px(4.0))
                     .children(week_cells)
@@ -329,7 +367,12 @@ impl CalendarModule {
             }
         }
 
-        div().flex().flex_col().px(px(12.0)).children(rows)
+        div()
+            .flex()
+            .flex_col()
+            .px(px(12.0))
+            .pb(px(16.0))
+            .children(rows)
     }
 
     /// Renders the timezone list with current times.
@@ -396,6 +439,7 @@ impl CalendarModule {
                     .flex_row()
                     .justify_between()
                     .items_center()
+                    .h(px(50.0))
                     .py(px(4.0))
                     .child(
                         div()
@@ -499,11 +543,38 @@ impl CalendarModule {
             .gap(px(8.0))
             .py(px(8.0))
             .mt(px(4.0))
-            .child(div().id("time-slider").child(render_slider(
-                &slider_style,
-                slider_value,
-                is_dragging,
-            )))
+            .child(
+                div()
+                    .id("time-slider")
+                    .on_mouse_down(MouseButton::Left, move |event, _window, _cx| {
+                        let inner_width = CALENDAR_POPUP_WIDTH - (TIMEZONE_PADDING_X * 2.0);
+                        let slider_left = TIMEZONE_PADDING_X + ((inner_width - SLIDER_WIDTH) / 2.0);
+                        let event_x = f32::from(event.position.x);
+                        dispatch_popup_action("calendar", PopupAction::DragStart);
+                        let local_x = (event_x - slider_left).clamp(0.0, SLIDER_WIDTH);
+                        let value = local_x / SLIDER_WIDTH;
+                        dispatch_popup_action("calendar", PopupAction::SliderSet { value });
+                        notify_popup_needs_render("calendar");
+                    })
+                    .on_mouse_move(|event, _window, _cx| {
+                        let inner_width = CALENDAR_POPUP_WIDTH - (TIMEZONE_PADDING_X * 2.0);
+                        let slider_left = TIMEZONE_PADDING_X + ((inner_width - SLIDER_WIDTH) / 2.0);
+                        let event_x = f32::from(event.position.x);
+                        let local_x = (event_x - slider_left).clamp(0.0, SLIDER_WIDTH);
+                        let value = local_x / SLIDER_WIDTH;
+                        dispatch_popup_action("calendar", PopupAction::SliderSet { value });
+                        notify_popup_needs_render("calendar");
+                    })
+                    .on_mouse_up(MouseButton::Left, move |_event, _window, _cx| {
+                        dispatch_popup_action("calendar", PopupAction::DragEnd);
+                        notify_popup_needs_render("calendar");
+                    })
+                    .on_mouse_up_out(MouseButton::Left, move |_event, _window, _cx| {
+                        dispatch_popup_action("calendar", PopupAction::DragEnd);
+                        notify_popup_needs_render("calendar");
+                    })
+                    .child(render_slider(&slider_style, slider_value, is_dragging)),
+            )
             .child(
                 div()
                     .flex()
@@ -525,6 +596,10 @@ impl CalendarModule {
                             .rounded(px(4.0))
                             .cursor_pointer()
                             .hover(|s| s.bg(self.theme.surface_hover))
+                            .on_mouse_down(MouseButton::Left, move |_event, _window, _cx| {
+                                dispatch_popup_action("calendar", PopupAction::Reset);
+                                notify_popup_needs_render("calendar");
+                            })
                             .text_color(if snapped_offset != 0 {
                                 self.theme.accent
                             } else {
@@ -572,12 +647,6 @@ impl GpuiModule for CalendarModule {
     }
 
     fn update(&mut self) -> bool {
-        // Check if we need to reset (popup just opened)
-        if self.needs_reset {
-            self.reset();
-            self.needs_reset = false;
-        }
-
         // Update date/time text
         let now = Local::now();
         let new_date = now.format(&self.date_format).to_string();
@@ -594,6 +663,20 @@ impl GpuiModule for CalendarModule {
     fn popup_spec(&self) -> Option<PopupSpec> {
         let height = self.calculate_height();
         log::debug!("CalendarModule::popup_spec height={}", height);
+        if std::env::var("RUSTYBAR_TRACE_POPUP").is_ok() {
+            if let Ok(mut file) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open("/tmp/rustybar_popup_trace.log")
+            {
+                let _ = writeln!(
+                    file,
+                    "{} calendar popup_spec height={}",
+                    chrono::Utc::now().to_rfc3339(),
+                    height
+                );
+            }
+        }
         Some(PopupSpec {
             width: 280.0,
             height,
@@ -602,22 +685,37 @@ impl GpuiModule for CalendarModule {
         })
     }
 
-    fn render_popup(&self, _theme: &Theme) -> Option<AnyElement> {
+    fn render_popup(&self, theme: &Theme) -> Option<AnyElement> {
         let timezone_rows = self.render_timezone_list();
         let slider = self.render_time_slider();
+
+        let (calendar_height, timezone_height, total_height, popup_height) = self.layout_metrics();
+        let timezone_visible_height = if total_height > popup_height {
+            (popup_height - calendar_height).max(0.0)
+        } else {
+            timezone_height
+        };
 
         Some(
             div()
                 .id("calendar-popup-content")
                 .flex()
                 .flex_col()
-                .w_full()
+                .size_full()
+                .min_h(px(popup_height as f32))
+                .h(px(popup_height as f32))
+                .bg(theme.background)
                 .child(self.render_calendar_grid())
                 .child(
                     div()
                         .id("timezone-scrubber")
                         .flex()
                         .flex_col()
+                        .flex_grow()
+                        .w_full()
+                        .h(px(timezone_visible_height as f32))
+                        .overflow_y_scroll()
+                        .bg(theme.background)
                         .px(px(12.0))
                         .child(slider)
                         .children(timezone_rows),
@@ -629,10 +727,43 @@ impl GpuiModule for CalendarModule {
     fn on_popup_event(&mut self, event: PopupEvent) {
         match event {
             PopupEvent::Opened => {
-                self.needs_reset = true;
+                self.reset();
+                if std::env::var("RUSTYBAR_TRACE_POPUP").is_ok() {
+                    if let Ok(mut file) = std::fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open("/tmp/rustybar_popup_trace.log")
+                    {
+                        let _ = writeln!(
+                            file,
+                            "{} calendar opened reset year={} month={}",
+                            chrono::Utc::now().to_rfc3339(),
+                            self.displayed_year,
+                            self.displayed_month
+                        );
+                    }
+                }
             }
             PopupEvent::Closed => {}
             _ => {}
+        }
+    }
+
+    fn on_popup_action(&mut self, action: PopupAction) {
+        match action {
+            PopupAction::Prev => self.prev_month(),
+            PopupAction::Next => self.next_month(),
+            PopupAction::Today => self.reset(),
+            PopupAction::Reset => self.set_offset(0),
+            PopupAction::DragStart => self.is_dragging = true,
+            PopupAction::DragEnd => self.is_dragging = false,
+            PopupAction::SliderSet { value } => {
+                if !self.is_dragging {
+                    return;
+                }
+                let minutes = Self::from_slider_value(value);
+                self.set_offset(minutes);
+            }
         }
     }
 }

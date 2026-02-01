@@ -58,6 +58,7 @@ pub fn run() {
 
         // Initialize popup manager
         popup_manager::init();
+        popup_manager::set_screen_dimensions(screen_width, screen_height);
 
         // Initialize module registry with theme
         let theme = theme::Theme::from_config(&config.bar);

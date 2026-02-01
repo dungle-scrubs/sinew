@@ -325,7 +325,11 @@ impl Render for PopupHostView {
 
         if let Some(ref spec) = spec {
             if spec.popup_type == self.popup_type {
-                let height = px(spec.height as f32);
+                let max_height = match self.popup_type {
+                    PopupType::Panel => crate::gpui_app::popup_manager::max_panel_height(),
+                    PopupType::Popup => crate::gpui_app::popup_manager::max_popup_height(),
+                };
+                let height = px(spec.height.min(max_height) as f32);
                 container = container.min_h(height).h(height);
             }
         }

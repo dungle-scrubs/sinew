@@ -49,6 +49,8 @@ static MODULE_CHANGE_BUS: OnceLock<ModuleChangeBus> = OnceLock::new();
 static LAST_CLICK_MS: AtomicU64 = AtomicU64::new(0);
 static LAST_ANCHOR: Mutex<Option<(f64, f64)>> = Mutex::new(None);
 static LAST_GLOBAL_CLICK_MS: AtomicU64 = AtomicU64::new(0);
+static SCREEN_HEIGHT: OnceLock<Mutex<f64>> = OnceLock::new();
+static SCREEN_WIDTH: OnceLock<Mutex<f64>> = OnceLock::new();
 
 struct ModuleChangeBus {
     subscribers: Mutex<Vec<Sender<String>>>,
@@ -82,6 +84,40 @@ impl ModuleChangeBus {
 
 fn module_change_bus() -> &'static ModuleChangeBus {
     MODULE_CHANGE_BUS.get_or_init(ModuleChangeBus::new)
+}
+
+pub fn set_screen_height(height: f64) {
+    let lock = SCREEN_HEIGHT.get_or_init(|| Mutex::new(900.0));
+    if let Ok(mut guard) = lock.lock() {
+        *guard = height;
+    }
+}
+
+pub fn set_screen_width(width: f64) {
+    let lock = SCREEN_WIDTH.get_or_init(|| Mutex::new(1440.0));
+    if let Ok(mut guard) = lock.lock() {
+        *guard = width;
+    }
+}
+
+pub fn set_screen_dimensions(width: f64, height: f64) {
+    set_screen_width(width);
+    set_screen_height(height);
+}
+
+pub fn max_panel_height() -> f64 {
+    let lock = SCREEN_HEIGHT.get_or_init(|| Mutex::new(900.0));
+    let height = lock.lock().map(|v| *v).unwrap_or(900.0);
+    height * 0.5
+}
+
+pub fn max_popup_height() -> f64 {
+    max_panel_height()
+}
+
+pub fn panel_width() -> f64 {
+    let lock = SCREEN_WIDTH.get_or_init(|| Mutex::new(1440.0));
+    lock.lock().map(|v| *v).unwrap_or(1440.0)
 }
 
 pub fn subscribe_module_changes() -> Receiver<String> {
@@ -449,8 +485,13 @@ pub fn reposition_popup_window(popup_type: PopupType, height: f64) {
         };
 
         if matches {
+            let max_height = match popup_type {
+                PopupType::Panel => max_panel_height(),
+                PopupType::Popup => max_popup_height(),
+            };
+            let clamped_height = height.min(max_height);
             let new_width = frame.size.width;
-            let new_y = bar_y - height;
+            let new_y = bar_y - clamped_height;
             let mut new_x = frame.origin.x;
 
             if popup_type == PopupType::Popup {
@@ -464,7 +505,7 @@ pub fn reposition_popup_window(popup_type: PopupType, height: f64) {
 
             let new_frame = objc2_foundation::NSRect::new(
                 objc2_foundation::NSPoint::new(new_x, new_y),
-                objc2_foundation::NSSize::new(new_width, height),
+                objc2_foundation::NSSize::new(new_width, clamped_height),
             );
             ns_window.setFrame_display(new_frame, false);
             return;
@@ -653,9 +694,18 @@ fn show_popup_window_appkit(popup_type: PopupType, height: f64) -> bool {
             now_millis().saturating_sub(click_ms)
         ));
     }
+    let max_height = match popup_type {
+        PopupType::Panel => max_panel_height(),
+        PopupType::Popup => max_popup_height(),
+    };
+    let clamped_height = if height > 0.0 {
+        height.min(max_height)
+    } else {
+        height
+    };
     trace_popup(&format!(
-        "show_popup_window_appkit start type={:?} height={}",
-        popup_type, height
+        "show_popup_window_appkit start type={:?} height={} max_height={}",
+        popup_type, clamped_height, max_height
     ));
     let Some(mtm) = MainThreadMarker::new() else {
         log::error!("show_popup_window: not on main thread");
@@ -709,7 +759,11 @@ fn show_popup_window_appkit(popup_type: PopupType, height: f64) -> bool {
             // Position the window and apply requested height.
             let new_width = frame.size.width;
             let current_height = frame.size.height;
-            let desired_height = if height > 0.0 { height } else { current_height };
+            let desired_height = if clamped_height > 0.0 {
+                clamped_height
+            } else {
+                current_height
+            };
             let new_y = bar_y - desired_height;
 
             if popup_type == PopupType::Popup {

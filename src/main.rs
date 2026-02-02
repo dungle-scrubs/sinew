@@ -11,6 +11,47 @@ mod window;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+fn socket_path() -> std::path::PathBuf {
+    let runtime_dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".to_string());
+    std::path::PathBuf::from(runtime_dir).join("rustybar.sock")
+}
+
+fn start_ipc_listener() -> std::io::Result<()> {
+    use std::io::{BufRead, BufReader, Write};
+    use std::os::unix::net::{UnixListener, UnixStream};
+
+    let socket = socket_path();
+    if let Some(parent) = socket.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let listener = match UnixListener::bind(&socket) {
+        Ok(listener) => listener,
+        Err(err) if err.kind() == std::io::ErrorKind::AddrInUse => {
+            if UnixStream::connect(&socket).is_ok() {
+                eprintln!("RustyBar is already running.");
+                std::process::exit(0);
+            }
+            let _ = std::fs::remove_file(&socket);
+            UnixListener::bind(&socket)?
+        }
+        Err(err) => return Err(err),
+    };
+
+    std::thread::spawn(move || {
+        for stream in listener.incoming().flatten() {
+            let mut reader = BufReader::new(stream);
+            let mut line = String::new();
+            let _ = reader.read_line(&mut line);
+            if let Ok(mut stream) = reader.into_inner().try_clone() {
+                let _ = writeln!(stream, "OK");
+            }
+        }
+    });
+
+    Ok(())
+}
+
 fn print_help() {
     println!(
         "rustybar {}
@@ -83,6 +124,10 @@ fn main() {
 
     if std::env::var("RUSTYBAR_TRACE_POPUP").is_ok() {
         let _ = std::fs::write("/tmp/rustybar_popup_trace.log", "");
+    }
+
+    if let Err(err) = start_ipc_listener() {
+        log::warn!("Failed to start IPC listener: {}", err);
     }
 
     // Run the GPUI-based application

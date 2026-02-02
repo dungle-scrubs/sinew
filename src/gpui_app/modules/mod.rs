@@ -295,6 +295,15 @@ fn parse_label_align(align: Option<&str>) -> LabelAlign {
     }
 }
 
+fn parse_temp_unit(unit: Option<&str>) -> temperature::TemperatureUnit {
+    match unit {
+        Some("f") | Some("F") | Some("fahrenheit") | Some("Fahrenheit") => {
+            temperature::TemperatureUnit::Fahrenheit
+        }
+        _ => temperature::TemperatureUnit::Celsius,
+    }
+}
+
 /// Creates a module from configuration.
 pub fn create_module(config: &ModuleConfig, index: usize) -> Option<PositionedModule> {
     let id = config
@@ -320,36 +329,46 @@ pub fn create_module(config: &ModuleConfig, index: usize) -> Option<PositionedMo
         "volume" => Some(Box::new(VolumeModule::new(&id))),
         "cpu" => {
             let label_align = parse_label_align(config.label_align.as_deref());
+            let fixed_width = config.value_fixed_width.unwrap_or(true);
             Some(Box::new(CpuModule::new(
                 &id,
                 config.label.as_deref(),
                 label_align,
+                fixed_width,
             )))
         }
         "temperature" | "temp" => {
             let label_align = parse_label_align(config.label_align.as_deref());
+            let unit = parse_temp_unit(config.temp_unit.as_deref());
+            let fixed_width = config.value_fixed_width.unwrap_or(true);
             Some(Box::new(TemperatureModule::new(
                 &id,
                 config.label.as_deref(),
                 label_align,
+                unit,
+                fixed_width,
             )))
         }
         "memory" => {
             let label_align = parse_label_align(config.label_align.as_deref());
+            let fixed_width = config.value_fixed_width.unwrap_or(true);
             Some(Box::new(MemoryModule::new(
                 &id,
                 config.label.as_deref(),
                 label_align,
+                fixed_width,
             )))
         }
         "disk" => {
             let path = config.path.as_deref().unwrap_or("/");
             let label_align = parse_label_align(config.label_align.as_deref());
+            let fixed_width = config.value_fixed_width.unwrap_or(false);
             Some(Box::new(DiskModule::new(
                 &id,
                 path,
                 config.label.as_deref(),
                 label_align,
+                fixed_width,
             )))
         }
         "wifi" => Some(Box::new(WifiModule::new(&id))),

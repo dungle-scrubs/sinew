@@ -10,18 +10,32 @@ use gpui::{div, prelude::*, px, AnyElement, SharedString, Styled};
 use super::{GpuiModule, LabelAlign};
 use crate::gpui_app::theme::Theme;
 
+#[derive(Clone, Copy, Debug)]
+pub enum TemperatureUnit {
+    Celsius,
+    Fahrenheit,
+}
+
 /// Temperature module that displays CPU temperature.
 pub struct TemperatureModule {
     id: String,
     label: Option<String>,
     label_align: LabelAlign,
+    unit: TemperatureUnit,
+    fixed_width: bool,
     temp_celsius: Arc<AtomicU8>,
     dirty: Arc<AtomicBool>,
 }
 
 impl TemperatureModule {
     /// Creates a new temperature module.
-    pub fn new(id: &str, label: Option<&str>, label_align: LabelAlign) -> Self {
+    pub fn new(
+        id: &str,
+        label: Option<&str>,
+        label_align: LabelAlign,
+        unit: TemperatureUnit,
+        fixed_width: bool,
+    ) -> Self {
         let initial = Self::fetch_temperature();
         let temp_celsius = Arc::new(AtomicU8::new(initial));
         let dirty = Arc::new(AtomicBool::new(true));
@@ -45,6 +59,8 @@ impl TemperatureModule {
             id: id.to_string(),
             label: label.map(|s| s.to_string()),
             label_align,
+            unit,
+            fixed_width,
             temp_celsius,
             dirty,
         }
@@ -116,7 +132,13 @@ impl GpuiModule for TemperatureModule {
     fn render(&self, theme: &Theme) -> AnyElement {
         let temp = self.temp_celsius.load(Ordering::Relaxed);
         let text = if temp > 0 {
-            format!("{}°", temp)
+            match self.unit {
+                TemperatureUnit::Celsius => format!("{}°", temp),
+                TemperatureUnit::Fahrenheit => {
+                    let fahrenheit = ((temp as f32 * 9.0 / 5.0) + 32.0).round() as i32;
+                    format!("{}°F", fahrenheit)
+                }
+            }
         } else {
             "—".to_string()
         };
@@ -145,7 +167,7 @@ impl GpuiModule for TemperatureModule {
                 )
                 .child(
                     div()
-                        .min_w(px(value_width))
+                        .min_w(px(if self.fixed_width { value_width } else { 0.0 }))
                         .flex()
                         .justify_end()
                         .text_color(theme.foreground)

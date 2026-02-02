@@ -15,13 +15,14 @@ pub struct CpuModule {
     id: String,
     label: Option<String>,
     label_align: LabelAlign,
+    fixed_width: bool,
     usage: Arc<AtomicU8>,
     dirty: Arc<AtomicBool>,
 }
 
 impl CpuModule {
     /// Creates a new CPU module.
-    pub fn new(id: &str, label: Option<&str>, label_align: LabelAlign) -> Self {
+    pub fn new(id: &str, label: Option<&str>, label_align: LabelAlign, fixed_width: bool) -> Self {
         let initial = Self::fetch_usage();
         let usage = Arc::new(AtomicU8::new(initial));
         let dirty = Arc::new(AtomicBool::new(true));
@@ -45,6 +46,7 @@ impl CpuModule {
             id: id.to_string(),
             label: label.map(|s| s.to_string()),
             label_align,
+            fixed_width,
             usage,
             dirty,
         }
@@ -100,7 +102,7 @@ impl GpuiModule for CpuModule {
                 )
                 .child(
                     div()
-                        .min_w(px(value_width))
+                        .min_w(px(if self.fixed_width { value_width } else { 0.0 }))
                         .flex()
                         .justify_end()
                         .text_color(theme.foreground)

@@ -4,6 +4,7 @@
 //! Each module implements the GpuiModule trait to render its content.
 //! Modules may optionally provide popup content.
 
+mod api_usage;
 mod app_name;
 mod battery;
 pub mod calendar;
@@ -27,6 +28,7 @@ mod weather;
 mod wifi;
 mod window_title;
 
+pub use api_usage::ApiUsageModule;
 pub use app_name::AppNameModule;
 pub use battery::BatteryModule;
 pub use calendar::CalendarModule;
@@ -369,6 +371,7 @@ pub fn create_module(config: &ModuleConfig, index: usize) -> Option<PositionedMo
             Some(Box::new(WeatherModule::new(&id, location, interval)))
         }
         "news" => Some(Box::new(NewsModule::new(&id))),
+        "api_usage" => Some(Box::new(ApiUsageModule::new(&id))),
         "script" => {
             let command = config.command.as_deref().unwrap_or("echo 'no command'");
             let interval = config.interval.map(|v| v as u64);
@@ -524,6 +527,7 @@ pub fn init_modules(theme: &Theme) {
     registry.register(CalendarModule::new(theme.clone()));
     registry.register(NewsModule::new_popup(theme.clone()));
     registry.register(DemoModule::new_popup(theme.clone()));
+    registry.register(ApiUsageModule::new_popup(theme.clone()));
 
     // Log registered modules
     let registered: Vec<&str> = registry.modules.keys().map(|s| s.as_str()).collect();

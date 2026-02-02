@@ -51,6 +51,7 @@ static LAST_ANCHOR: Mutex<Option<(f64, f64)>> = Mutex::new(None);
 static LAST_GLOBAL_CLICK_MS: AtomicU64 = AtomicU64::new(0);
 static SCREEN_HEIGHT: OnceLock<Mutex<f64>> = OnceLock::new();
 static SCREEN_WIDTH: OnceLock<Mutex<f64>> = OnceLock::new();
+static SCREEN_BAR_HEIGHT: OnceLock<Mutex<f64>> = OnceLock::new();
 
 struct ModuleChangeBus {
     subscribers: Mutex<Vec<Sender<String>>>,
@@ -105,16 +106,26 @@ pub fn set_screen_dimensions(width: f64, height: f64) {
     set_screen_height(height);
 }
 
+pub fn set_bar_height(height: f64) {
+    let lock = SCREEN_BAR_HEIGHT.get_or_init(|| Mutex::new(32.0));
+    if let Ok(mut guard) = lock.lock() {
+        *guard = height;
+    }
+}
+
+fn bar_height() -> f64 {
+    let lock = SCREEN_BAR_HEIGHT.get_or_init(|| Mutex::new(32.0));
+    lock.lock().map(|v| *v).unwrap_or(32.0)
+}
+
 pub fn max_panel_height() -> f64 {
     let lock = SCREEN_HEIGHT.get_or_init(|| Mutex::new(900.0));
     let height = lock.lock().map(|v| *v).unwrap_or(900.0);
-    height
+    (height - bar_height()).max(0.0)
 }
 
 pub fn max_popup_height() -> f64 {
-    let lock = SCREEN_HEIGHT.get_or_init(|| Mutex::new(900.0));
-    let height = lock.lock().map(|v| *v).unwrap_or(900.0);
-    height * 0.8
+    max_panel_height() * 0.8
 }
 
 pub fn panel_width() -> f64 {
@@ -696,6 +707,12 @@ fn show_popup_window_appkit(popup_type: PopupType, height: f64) -> bool {
             now_millis().saturating_sub(click_ms)
         ));
     }
+    let screen_height = SCREEN_HEIGHT
+        .get_or_init(|| Mutex::new(900.0))
+        .lock()
+        .map(|v| *v)
+        .unwrap_or(900.0);
+    let bar_height = bar_height();
     let max_height = match popup_type {
         PopupType::Panel => max_panel_height(),
         PopupType::Popup => max_popup_height(),
@@ -705,6 +722,15 @@ fn show_popup_window_appkit(popup_type: PopupType, height: f64) -> bool {
     } else {
         height
     };
+    log::info!(
+        "show_popup_window_appkit heights type={:?} req_h={:.1} max_h={:.1} clamped_h={:.1} screen_h={:.1} bar_h={:.1}",
+        popup_type,
+        height,
+        max_height,
+        clamped_height,
+        screen_height,
+        bar_height
+    );
     trace_popup(&format!(
         "show_popup_window_appkit start type={:?} height={} max_height={}",
         popup_type, clamped_height, max_height
@@ -815,6 +841,14 @@ fn show_popup_window_appkit(popup_type: PopupType, height: f64) -> bool {
                 ns_window.setFrame_display(new_frame, false);
             }
             let post_frame = ns_window.frame();
+            log::info!(
+                "show_popup_window_appkit frame_after type={:?} frame=({:.1},{:.1}) {:.1}x{:.1}",
+                popup_type,
+                post_frame.origin.x,
+                post_frame.origin.y,
+                post_frame.size.width,
+                post_frame.size.height
+            );
             trace_popup(&format!(
                 "show_popup_window_appkit frame_after type={:?} frame=({:.1},{:.1}) {:.1}x{:.1}",
                 popup_type,

@@ -196,6 +196,13 @@ impl Render for PopupHostView {
                 let desired_height = px(spec.height as f32);
                 let current_height: f32 = current_bounds.size.height.into();
                 let desired_height_f32: f32 = desired_height.into();
+                log::info!(
+                    "PopupHost[{:?}] height_check id='{}' spec_h={:.1} current_h={:.1}",
+                    self.popup_type,
+                    self.module_id,
+                    spec.height,
+                    current_height
+                );
 
                 if std::env::var("RUSTYBAR_TRACE_POPUP").is_ok() {
                     if let Ok(mut file) = std::fs::OpenOptions::new()
@@ -337,7 +344,18 @@ impl Render for PopupHostView {
                     PopupType::Panel => crate::gpui_app::popup_manager::max_panel_height(),
                     PopupType::Popup => crate::gpui_app::popup_manager::max_popup_height(),
                 };
-                let height = px(clamp_popup_height(spec.height, max_height) as f32);
+                let height_value = clamp_popup_height(spec.height, max_height);
+                let window_bounds = _window.bounds();
+                log::info!(
+                    "PopupHost[{:?}] container height id='{}' spec_h={:.1} max_h={:.1} final_h={:.1} win_h={:.1}",
+                    self.popup_type,
+                    self.module_id,
+                    spec.height,
+                    max_height,
+                    height_value,
+                    f64::from(window_bounds.size.height)
+                );
+                let height = px(height_value as f32);
                 container = container.min_h(height).h(height);
             }
         }

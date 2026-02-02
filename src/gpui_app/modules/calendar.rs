@@ -690,9 +690,11 @@ impl GpuiModule for CalendarModule {
         let timezone_rows = self.render_timezone_list();
         let slider = self.render_time_slider();
 
+        const POPUP_BOTTOM_PADDING: f64 = 16.0;
         let (calendar_height, timezone_height, total_height, popup_height) = self.layout_metrics();
-        let timezone_visible_height = if total_height > popup_height {
-            (popup_height - calendar_height).max(0.0)
+        let content_height = (popup_height - POPUP_BOTTOM_PADDING).max(0.0);
+        let timezone_visible_height = if total_height > content_height {
+            (content_height - calendar_height).max(0.0)
         } else {
             timezone_height
         };
@@ -703,8 +705,8 @@ impl GpuiModule for CalendarModule {
                 .flex()
                 .flex_col()
                 .size_full()
-                .min_h(px(popup_height as f32))
-                .h(px(popup_height as f32))
+                .min_h(px(content_height as f32))
+                .h(px(content_height as f32))
                 .bg(theme.background)
                 .child(self.render_calendar_grid())
                 .child(
@@ -715,11 +717,18 @@ impl GpuiModule for CalendarModule {
                         .flex_grow()
                         .w_full()
                         .h(px(timezone_visible_height as f32))
-                        .overflow_y_scroll()
                         .bg(theme.background)
                         .px(px(12.0))
                         .child(slider)
-                        .children(timezone_rows),
+                        .child(
+                            div()
+                                .id("timezone-list")
+                                .flex()
+                                .flex_col()
+                                .flex_grow()
+                                .overflow_y_scroll()
+                                .children(timezone_rows),
+                        ),
                 )
                 .into_any_element(),
         )

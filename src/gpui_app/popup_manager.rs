@@ -108,11 +108,13 @@ pub fn set_screen_dimensions(width: f64, height: f64) {
 pub fn max_panel_height() -> f64 {
     let lock = SCREEN_HEIGHT.get_or_init(|| Mutex::new(900.0));
     let height = lock.lock().map(|v| *v).unwrap_or(900.0);
-    height * 0.5
+    height
 }
 
 pub fn max_popup_height() -> f64 {
-    max_panel_height()
+    let lock = SCREEN_HEIGHT.get_or_init(|| Mutex::new(900.0));
+    let height = lock.lock().map(|v| *v).unwrap_or(900.0);
+    height * 0.8
 }
 
 pub fn panel_width() -> f64 {
@@ -1053,6 +1055,21 @@ mod tests {
             let visible = toggle_popup("dummy");
             assert!(visible);
             assert_eq!(pending_show_for_test(), Some((PopupType::Panel, 123.0)));
+            assert_eq!(ops.show_calls.load(Ordering::SeqCst), 1);
+        });
+    }
+
+    #[test]
+    fn toggle_popup_shows_immediately_when_window_available() {
+        with_test_lock(|| {
+            reset_popup_state();
+            install_dummy_registry();
+            let ops = Arc::new(TestWindowOps::new(vec![true]));
+            set_window_ops_for_test(ops.clone());
+
+            let visible = toggle_popup("dummy");
+            assert!(visible);
+            assert_eq!(pending_show_for_test(), None);
             assert_eq!(ops.show_calls.load(Ordering::SeqCst), 1);
         });
     }

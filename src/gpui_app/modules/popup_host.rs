@@ -140,6 +140,10 @@ impl PopupHostView {
     }
 }
 
+fn clamp_popup_height(spec_height: f64, max_height: f64) -> f64 {
+    spec_height.min(max_height)
+}
+
 impl Render for PopupHostView {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> AnyElement {
         let render_start = Instant::now();
@@ -299,7 +303,10 @@ impl Render for PopupHostView {
         // Style based on popup type
         match self.popup_type {
             PopupType::Panel => {
-                container = container.bg(self.theme.background).overflow_y_scroll();
+                container = container
+                    .bg(self.theme.background)
+                    .overflow_y_scroll()
+                    .pb(px(16.0));
             }
             PopupType::Popup => {
                 container = container
@@ -308,7 +315,8 @@ impl Render for PopupHostView {
                     .border_l_1()
                     .border_r_1()
                     .border_b_1()
-                    .overflow_y_scroll();
+                    .overflow_y_scroll()
+                    .pb(px(16.0));
             }
         }
 
@@ -329,30 +337,32 @@ impl Render for PopupHostView {
                     PopupType::Panel => crate::gpui_app::popup_manager::max_panel_height(),
                     PopupType::Popup => crate::gpui_app::popup_manager::max_popup_height(),
                 };
-                let height = px(spec.height.min(max_height) as f32);
+                let height = px(clamp_popup_height(spec.height, max_height) as f32);
                 container = container.min_h(height).h(height);
             }
         }
 
         if let Some(content) = content {
-            match self.popup_type {
-                PopupType::Popup => container
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .size_full()
-                            .flex_grow()
-                            .h(px(spec.as_ref().map(|s| s.height).unwrap_or(0.0) as f32))
-                            .bg(self.theme.background)
-                            .child(content)
-                            .child(div().flex_grow()),
-                    )
-                    .into_any_element(),
-                PopupType::Panel => container.child(content).into_any_element(),
-            }
+            container.child(content).into_any_element()
         } else {
             container.into_any_element()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::clamp_popup_height;
+
+    #[test]
+    fn clamp_popup_height_allows_content_below_max() {
+        let height = clamp_popup_height(200.0, 500.0);
+        assert_eq!(height, 200.0);
+    }
+
+    #[test]
+    fn clamp_popup_height_caps_at_max() {
+        let height = clamp_popup_height(600.0, 500.0);
+        assert_eq!(height, 500.0);
     }
 }

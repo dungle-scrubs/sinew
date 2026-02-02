@@ -184,7 +184,9 @@ impl GpuiModule for DemoModule {
 
     fn popup_spec(&self) -> Option<PopupSpec> {
         if self.theme.is_some() {
-            Some(PopupSpec::panel(Self::PANEL_HEIGHT))
+            Some(PopupSpec::panel(
+                crate::gpui_app::popup_manager::max_panel_height(),
+            ))
         } else {
             None
         }

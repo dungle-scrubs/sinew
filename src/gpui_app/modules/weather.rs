@@ -1,7 +1,9 @@
 //! Weather module with async loading states.
 
 use std::process::Command;
-use std::time::{Duration, Instant};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use gpui::{div, prelude::*, px, AnyElement, SharedString, Styled};
 
@@ -33,23 +35,39 @@ pub struct WeatherModule {
     id: String,
     location: String,
     update_interval: Duration,
-    last_update: Instant,
-    state: LoadingState<WeatherData>,
+    state: Arc<Mutex<LoadingState<WeatherData>>>,
+    dirty: Arc<AtomicBool>,
     loading_mode: LoadingMode,
 }
 
 impl WeatherModule {
     /// Creates a new weather module.
     pub fn new(id: &str, location: &str, update_interval_secs: u64) -> Self {
-        let mut module = Self {
+        let state = Arc::new(Mutex::new(LoadingState::Loading));
+        let dirty = Arc::new(AtomicBool::new(true));
+
+        let location = location.to_string();
+        let location_handle = location.clone();
+        let interval = Duration::from_secs(update_interval_secs);
+        let state_handle = Arc::clone(&state);
+        let dirty_handle = Arc::clone(&dirty);
+        std::thread::spawn(move || loop {
+            let next = Self::fetch_weather(&location_handle);
+            if let Ok(mut guard) = state_handle.lock() {
+                *guard = next;
+            }
+            dirty_handle.store(true, Ordering::Relaxed);
+            std::thread::sleep(interval);
+        });
+
+        let module = Self {
             id: id.to_string(),
-            location: location.to_string(),
-            update_interval: Duration::from_secs(update_interval_secs),
-            last_update: Instant::now() - Duration::from_secs(update_interval_secs + 1),
-            state: LoadingState::Loading,
+            location,
+            update_interval: interval,
+            state,
+            dirty,
             loading_mode: LoadingMode::Skeleton,
         };
-        module.fetch_weather();
         module
     }
 
@@ -59,12 +77,12 @@ impl WeatherModule {
         self
     }
 
-    fn fetch_weather(&mut self) {
+    fn fetch_weather(location: &str) -> LoadingState<WeatherData> {
         // Use wttr.in for simple weather data
-        let url = if self.location == "auto" {
+        let url = if location == "auto" {
             "wttr.in/?format=%t|%C".to_string()
         } else {
-            format!("wttr.in/{}?format=%t|%C", self.location)
+            format!("wttr.in/{}?format=%t|%C", location)
         };
 
         let output = Command::new("curl")
@@ -97,18 +115,16 @@ impl WeatherModule {
                         _ => weather_icons::CLOUDY,
                     };
 
-                    self.state = LoadingState::Loaded(WeatherData {
+                    return LoadingState::Loaded(WeatherData {
                         temp,
                         condition: parts[1].trim().to_string(),
                         icon,
                     });
-                    self.last_update = Instant::now();
-                    return;
                 }
             }
-            self.state = LoadingState::Error("Invalid response".to_string());
+            return LoadingState::Error("Invalid response".to_string());
         } else {
-            self.state = LoadingState::Error("Fetch failed".to_string());
+            return LoadingState::Error("Fetch failed".to_string());
         }
     }
 }
@@ -119,7 +135,12 @@ impl GpuiModule for WeatherModule {
     }
 
     fn render(&self, theme: &Theme) -> AnyElement {
-        match &self.state {
+        let state = self
+            .state
+            .lock()
+            .map(|s| s.clone())
+            .unwrap_or(LoadingState::Loading);
+        match &state {
             LoadingState::Loading => {
                 match self.loading_mode {
                     LoadingMode::Skeleton => {
@@ -158,15 +179,10 @@ impl GpuiModule for WeatherModule {
     }
 
     fn update(&mut self) -> bool {
-        if self.last_update.elapsed() > self.update_interval {
-            self.fetch_weather();
-            true
-        } else {
-            false
-        }
+        self.dirty.swap(false, Ordering::Relaxed)
     }
 
     fn is_loading(&self) -> bool {
-        self.state.is_loading()
+        self.state.lock().map(|s| s.is_loading()).unwrap_or(true)
     }
 }

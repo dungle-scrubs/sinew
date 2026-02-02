@@ -1,7 +1,9 @@
 //! Script module for running custom commands.
 
 use std::process::Command;
-use std::time::{Duration, Instant};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use gpui::{div, prelude::*, px, AnyElement, SharedString, Styled};
 
@@ -14,37 +16,51 @@ pub struct ScriptModule {
     command: String,
     interval: Duration,
     icon: Option<String>,
-    last_run: Instant,
-    output: String,
+    output: Arc<Mutex<String>>,
+    dirty: Arc<AtomicBool>,
 }
 
 impl ScriptModule {
     /// Creates a new script module.
     pub fn new(id: &str, command: &str, interval_secs: Option<u64>, icon: Option<&str>) -> Self {
         let interval = Duration::from_secs(interval_secs.unwrap_or(60));
-        let mut module = Self {
+        let output = Arc::new(Mutex::new(String::new()));
+        let dirty = Arc::new(AtomicBool::new(true));
+
+        let command = command.to_string();
+        let command_handle = command.clone();
+        let output_handle = Arc::clone(&output);
+        let dirty_handle = Arc::clone(&dirty);
+        std::thread::spawn(move || loop {
+            let next = Self::run_command(&command_handle);
+            if let Ok(mut guard) = output_handle.lock() {
+                *guard = next;
+            }
+            dirty_handle.store(true, Ordering::Relaxed);
+            std::thread::sleep(interval);
+        });
+
+        Self {
             id: id.to_string(),
-            command: command.to_string(),
+            command,
             interval,
             icon: icon.map(|s| s.to_string()),
-            last_run: Instant::now() - interval - Duration::from_secs(1),
-            output: String::new(),
-        };
-        module.run_command();
-        module
+            output,
+            dirty,
+        }
     }
 
-    fn run_command(&mut self) {
+    fn run_command(command: &str) -> String {
         let output = Command::new("sh")
-            .args(["-c", &self.command])
+            .args(["-c", command])
             .output()
             .ok()
             .and_then(|o| String::from_utf8(o.stdout).ok());
 
         if let Some(out) = output {
-            self.output = out.trim().to_string();
+            return out.trim().to_string();
         }
-        self.last_run = Instant::now();
+        String::new()
     }
 }
 
@@ -54,14 +70,15 @@ impl GpuiModule for ScriptModule {
     }
 
     fn render(&self, theme: &Theme) -> AnyElement {
+        let output = self.output.lock().map(|v| v.clone()).unwrap_or_default();
         let text = if let Some(ref icon) = self.icon {
-            if self.output.is_empty() {
+            if output.is_empty() {
                 icon.clone()
             } else {
-                format!("{} {}", icon, self.output)
+                format!("{} {}", icon, output)
             }
         } else {
-            self.output.clone()
+            output
         };
 
         div()
@@ -74,12 +91,6 @@ impl GpuiModule for ScriptModule {
     }
 
     fn update(&mut self) -> bool {
-        if self.last_run.elapsed() > self.interval {
-            let old_output = self.output.clone();
-            self.run_command();
-            old_output != self.output
-        } else {
-            false
-        }
+        self.dirty.swap(false, Ordering::Relaxed)
     }
 }

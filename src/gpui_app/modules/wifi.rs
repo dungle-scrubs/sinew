@@ -1,6 +1,9 @@
 //! WiFi module for displaying network status.
 
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use gpui::{div, prelude::*, px, AnyElement, SharedString, Styled};
 
@@ -11,21 +14,41 @@ use crate::gpui_app::theme::Theme;
 /// WiFi module that displays the current WiFi network.
 pub struct WifiModule {
     id: String,
-    ssid: Option<String>,
+    ssid: Arc<Mutex<Option<String>>>,
+    dirty: Arc<AtomicBool>,
 }
 
 impl WifiModule {
     /// Creates a new WiFi module.
     pub fn new(id: &str) -> Self {
-        let mut module = Self {
+        let ssid = Arc::new(Mutex::new(None));
+        let dirty = Arc::new(AtomicBool::new(true));
+
+        let ssid_handle = Arc::clone(&ssid);
+        let dirty_handle = Arc::clone(&dirty);
+        std::thread::spawn(move || {
+            let mut last: Option<String> = None;
+            loop {
+                let next = Self::fetch_status();
+                if next != last {
+                    if let Ok(mut guard) = ssid_handle.lock() {
+                        *guard = next.clone();
+                    }
+                    dirty_handle.store(true, Ordering::Relaxed);
+                    last = next;
+                }
+                std::thread::sleep(Duration::from_secs(5));
+            }
+        });
+
+        Self {
             id: id.to_string(),
-            ssid: None,
-        };
-        module.fetch_status();
-        module
+            ssid,
+            dirty,
+        }
     }
 
-    fn fetch_status(&mut self) {
+    fn fetch_status() -> Option<String> {
         let output = Command::new("sh")
             .args(["-c", "/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport -I | grep ' SSID' | cut -d ':' -f 2 | tr -d ' '"])
             .output()
@@ -35,11 +58,11 @@ impl WifiModule {
         if let Some(ssid) = output {
             let ssid = ssid.trim();
             if ssid.is_empty() {
-                self.ssid = None;
-            } else {
-                self.ssid = Some(ssid.to_string());
+                return None;
             }
+            return Some(ssid.to_string());
         }
+        None
     }
 }
 
@@ -49,7 +72,8 @@ impl GpuiModule for WifiModule {
     }
 
     fn render(&self, theme: &Theme) -> AnyElement {
-        let (_icon, text) = match &self.ssid {
+        let ssid = self.ssid.lock().ok().and_then(|s| s.clone());
+        let (_icon, text) = match ssid {
             Some(ssid) => (
                 wifi_icons::CONNECTED,
                 format!("{} {}", wifi_icons::CONNECTED, ssid),
@@ -70,8 +94,6 @@ impl GpuiModule for WifiModule {
     }
 
     fn update(&mut self) -> bool {
-        let old_ssid = self.ssid.clone();
-        self.fetch_status();
-        old_ssid != self.ssid
+        self.dirty.swap(false, Ordering::Relaxed)
     }
 }

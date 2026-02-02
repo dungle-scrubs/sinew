@@ -1,6 +1,9 @@
 //! Memory module for displaying RAM usage.
 
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
 
 use gpui::{div, prelude::*, px, AnyElement, SharedString, Styled};
 
@@ -12,23 +15,45 @@ pub struct MemoryModule {
     id: String,
     label: Option<String>,
     label_align: LabelAlign,
-    usage: u8,
+    fixed_width: bool,
+    usage: Arc<AtomicU8>,
+    dirty: Arc<AtomicBool>,
 }
 
 impl MemoryModule {
     /// Creates a new memory module.
-    pub fn new(id: &str, label: Option<&str>, label_align: LabelAlign) -> Self {
-        let mut module = Self {
+    pub fn new(id: &str, label: Option<&str>, label_align: LabelAlign, fixed_width: bool) -> Self {
+        let usage = Arc::new(AtomicU8::new(0));
+        let dirty = Arc::new(AtomicBool::new(true));
+
+        let usage_handle = Arc::clone(&usage);
+        let dirty_handle = Arc::clone(&dirty);
+        std::thread::spawn(move || {
+            let mut last = 0;
+            loop {
+                let next = Self::fetch_status();
+                if next != last {
+                    usage_handle.store(next, Ordering::Relaxed);
+                    dirty_handle.store(true, Ordering::Relaxed);
+                    last = next;
+                }
+                std::thread::sleep(Duration::from_secs(5));
+            }
+        });
+
+        let module = Self {
             id: id.to_string(),
             label: label.map(|s| s.to_string()),
             label_align,
-            usage: 0,
+            fixed_width,
+            usage,
+            dirty,
         };
-        module.fetch_status();
         module
     }
 
-    fn fetch_status(&mut self) {
+    fn fetch_status() -> u8 {
+        let mut usage = 0;
         let output = Command::new("sh")
             .args(["-c", "memory_pressure | grep 'System-wide memory free percentage' | awk '{print $5}' | tr -d '%'"])
             .output()
@@ -36,8 +61,9 @@ impl MemoryModule {
             .and_then(|o| String::from_utf8(o.stdout).ok());
 
         if let Some(free) = output.and_then(|s| s.trim().parse::<f32>().ok()) {
-            self.usage = (100.0 - free).round() as u8;
+            usage = (100.0 - free).round() as u8;
         }
+        usage
     }
 }
 
@@ -47,7 +73,8 @@ impl GpuiModule for MemoryModule {
     }
 
     fn render(&self, theme: &Theme) -> AnyElement {
-        let text = format!("{}%", self.usage);
+        let usage = self.usage.load(Ordering::Relaxed);
+        let text = format!("{}%", usage);
 
         if let Some(ref label) = self.label {
             // Two-line layout with label - configurable alignment
@@ -72,7 +99,7 @@ impl GpuiModule for MemoryModule {
                 )
                 .child(
                     div()
-                        .min_w(px(value_width))
+                        .min_w(px(if self.fixed_width { value_width } else { 0.0 }))
                         .flex()
                         .justify_end()
                         .text_color(theme.foreground)
@@ -93,12 +120,10 @@ impl GpuiModule for MemoryModule {
     }
 
     fn update(&mut self) -> bool {
-        let old_usage = self.usage;
-        self.fetch_status();
-        old_usage != self.usage
+        self.dirty.swap(false, Ordering::Relaxed)
     }
 
     fn value(&self) -> Option<u8> {
-        Some(100 - self.usage) // Invert so low memory usage is "good"
+        Some(100 - self.usage.load(Ordering::Relaxed)) // Invert so low memory usage is "good"
     }
 }

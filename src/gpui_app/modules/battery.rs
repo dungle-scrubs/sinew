@@ -1,6 +1,9 @@
 //! Battery module for displaying battery status.
 
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
 
 use gpui::{div, prelude::*, px, AnyElement, SharedString, Styled};
 
@@ -12,24 +15,50 @@ use crate::gpui_app::theme::Theme;
 pub struct BatteryModule {
     id: String,
     label: Option<String>,
-    level: u8,
-    charging: bool,
+    level: Arc<AtomicU8>,
+    charging: Arc<AtomicBool>,
+    dirty: Arc<AtomicBool>,
 }
 
 impl BatteryModule {
     /// Creates a new battery module.
     pub fn new(id: &str, label: Option<&str>) -> Self {
-        let mut module = Self {
+        let level = Arc::new(AtomicU8::new(0));
+        let charging = Arc::new(AtomicBool::new(false));
+        let dirty = Arc::new(AtomicBool::new(true));
+
+        let level_handle = Arc::clone(&level);
+        let charging_handle = Arc::clone(&charging);
+        let dirty_handle = Arc::clone(&dirty);
+        std::thread::spawn(move || {
+            let mut last_level = 0;
+            let mut last_charging = false;
+            loop {
+                let (next_level, next_charging) = Self::fetch_status();
+                if next_level != last_level || next_charging != last_charging {
+                    level_handle.store(next_level, Ordering::Relaxed);
+                    charging_handle.store(next_charging, Ordering::Relaxed);
+                    dirty_handle.store(true, Ordering::Relaxed);
+                    last_level = next_level;
+                    last_charging = next_charging;
+                }
+                std::thread::sleep(Duration::from_secs(30));
+            }
+        });
+
+        let module = Self {
             id: id.to_string(),
             label: label.map(|s| s.to_string()),
-            level: 0,
-            charging: false,
+            level,
+            charging,
+            dirty,
         };
-        module.fetch_status();
         module
     }
 
-    fn fetch_status(&mut self) {
+    fn fetch_status() -> (u8, bool) {
+        let mut level = 0;
+        let mut charging = false;
         let output = Command::new("pmset")
             .args(["-g", "batt"])
             .output()
@@ -42,7 +71,7 @@ impl BatteryModule {
                     // Check for charging - only "charging" status, not "charged" or "discharging"
                     // pmset shows: "charging", "discharging", "charged", "finishing charge"
                     let lower = line.to_lowercase();
-                    self.charging = lower.contains("charging") && !lower.contains("discharging");
+                    charging = lower.contains("charging") && !lower.contains("discharging");
 
                     // Extract percentage
                     if let Some(pct_pos) = line.find('%') {
@@ -50,14 +79,15 @@ impl BatteryModule {
                             .rfind(|c: char| !c.is_ascii_digit())
                             .map(|i| i + 1)
                             .unwrap_or(0);
-                        if let Ok(level) = line[start..pct_pos].parse::<u8>() {
-                            self.level = level;
+                        if let Ok(parsed_level) = line[start..pct_pos].parse::<u8>() {
+                            level = parsed_level;
                         }
                     }
                     break;
                 }
             }
         }
+        (level, charging)
     }
 }
 
@@ -67,8 +97,10 @@ impl GpuiModule for BatteryModule {
     }
 
     fn render(&self, theme: &Theme) -> AnyElement {
-        let icon = battery_icons::for_level(self.level, self.charging);
-        let text = format!("{}%", self.level);
+        let level = self.level.load(Ordering::Relaxed);
+        let charging = self.charging.load(Ordering::Relaxed);
+        let icon = battery_icons::for_level(level, charging);
+        let text = format!("{}%", level);
 
         if let Some(ref label) = self.label {
             // Two-line layout with label - tight spacing
@@ -110,13 +142,10 @@ impl GpuiModule for BatteryModule {
     }
 
     fn update(&mut self) -> bool {
-        let old_level = self.level;
-        let old_charging = self.charging;
-        self.fetch_status();
-        old_level != self.level || old_charging != self.charging
+        self.dirty.swap(false, Ordering::Relaxed)
     }
 
     fn value(&self) -> Option<u8> {
-        Some(self.level)
+        Some(self.level.load(Ordering::Relaxed))
     }
 }

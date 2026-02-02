@@ -197,13 +197,16 @@ impl GpuiModule for DemoModule {
             return None;
         }
 
+        let min_height = crate::gpui_app::popup_manager::max_panel_height();
         Some(
             div()
                 .flex()
                 .flex_col()
+                .flex_grow()
                 .gap(px(16.0))
                 .p(px(24.0))
-                .w_full()
+                .min_h(px(min_height as f32))
+                .size_full()
                 // Title
                 .child(
                     div()

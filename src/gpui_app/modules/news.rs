@@ -102,7 +102,7 @@ impl NewsModule {
     fn estimated_panel_height(&self, data: &ReleasesData) -> f64 {
         // Rough layout math to keep panel height close to content, capped by half screen.
         let container_padding = 32.0; // p(16) top + bottom
-        let title_height = 24.0;
+        let title_height = 26.0;
         let title_gap = 12.0; // gap between title and first row
         let row_gap = 12.0; // gap between rows
 
@@ -110,7 +110,7 @@ impl NewsModule {
         let mut column_heights = Vec::with_capacity(data.sources.len());
         for (_source, releases) in data.sources.iter() {
             let column_padding = 24.0; // p(12) top + bottom
-            let header_height = 18.0;
+            let header_height = 20.0;
             let header_gap = 8.0; // column gap
 
             let column_body = if releases.is_empty() {
@@ -120,8 +120,8 @@ impl NewsModule {
                     .get(0)
                     .map(|r| r.items.len().min(6) as f64)
                     .unwrap_or(0.0);
-                let version_height = 14.0;
-                let item_height = 14.0;
+                let version_height = 16.0;
+                let item_height = 16.0;
                 let item_gap = 4.0;
                 version_height + (items * item_height) + (items * item_gap)
             };
@@ -143,7 +143,7 @@ impl NewsModule {
         };
         let rows_total = row_heights.iter().sum::<f64>()
             + row_gap * (row_heights.len().saturating_sub(1) as f64);
-        let total = container_padding + title_height + title_gap + rows_total + 8.0;
+        let total = container_padding + title_height + title_gap + rows_total + 10.0;
         let max_height = crate::gpui_app::popup_manager::max_panel_height();
         total.min(max_height.max(Self::PANEL_HEIGHT))
     }
@@ -552,17 +552,17 @@ impl NewsModule {
                     .flex_row()
                     .items_center()
                     .gap(px(6.0))
-                    .h(px(18.0))
+                    .h(px(20.0))
                     .child(
                         div()
                             .text_color(theme.accent)
-                            .text_size(px(14.0))
+                            .text_size(px(15.0))
                             .child(icon_str),
                     )
                     .child(
                         div()
                             .text_color(theme.foreground)
-                            .text_size(px(13.0))
+                            .text_size(px(14.0))
                             .font_weight(gpui::FontWeight::SEMIBOLD)
                             .child(name_str),
                     ),
@@ -578,8 +578,8 @@ impl NewsModule {
             return column.child(
                 div()
                     .text_color(theme.foreground_muted)
-                    .text_size(px(11.0))
-                    .h(px(14.0))
+                    .text_size(px(12.0))
+                    .h(px(16.0))
                     .child("No releases"),
             );
         }
@@ -589,9 +589,9 @@ impl NewsModule {
             let mut release_div = div().flex().flex_col().gap(px(4.0)).child(
                 div()
                     .text_color(theme.accent)
-                    .text_size(px(11.0))
+                    .text_size(px(12.0))
                     .font_weight(gpui::FontWeight::MEDIUM)
-                    .h(px(14.0))
+                    .h(px(16.0))
                     .child(version_str),
             );
 
@@ -606,17 +606,17 @@ impl NewsModule {
                         .flex()
                         .flex_row()
                         .gap(px(4.0))
-                        .h(px(14.0))
+                        .h(px(16.0))
                         .child(
                             div()
                                 .text_color(theme.success)
-                                .text_size(px(11.0))
+                                .text_size(px(12.0))
                                 .child("+"),
                         )
                         .child(
                             div()
                                 .text_color(theme.foreground)
-                                .text_size(px(11.0))
+                                .text_size(px(12.0))
                                 .child(text),
                         ),
                 );
@@ -726,7 +726,7 @@ impl GpuiModule for NewsModule {
             .child(
                 div()
                     .text_color(theme.foreground)
-                    .text_size(px(16.0))
+                    .text_size(px(18.0))
                     .font_weight(gpui::FontWeight::BOLD)
                     .child("Release Notes"),
             );

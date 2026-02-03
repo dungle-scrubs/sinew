@@ -9,6 +9,7 @@ pub mod camera;
 pub mod modules;
 pub mod popup_manager;
 pub mod primitives;
+pub mod scheduler;
 pub mod theme;
 
 use gpui::{
@@ -31,6 +32,10 @@ pub fn run() {
     Application::new().run(|cx: &mut App| {
         // Get main thread marker for AppKit operations
         let mtm = MainThreadMarker::new().expect("Must run on main thread");
+
+        // Initialize module factories before loading config so validation knows types.
+        modules::init_module_factories();
+        crate::config::set_known_module_types(modules::registered_module_types());
 
         // Load config
         let config = load_config();

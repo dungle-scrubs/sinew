@@ -5,9 +5,25 @@ pub use types::{parse_hex_color, BarConfig, Config, ModuleConfig};
 use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
 use std::path::PathBuf;
 use std::sync::mpsc::{channel, Receiver};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
 pub type SharedConfig = Arc<RwLock<Config>>;
+
+static KNOWN_MODULE_TYPES: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
+
+pub fn set_known_module_types(types: Vec<String>) {
+    let lock = KNOWN_MODULE_TYPES.get_or_init(|| Mutex::new(Vec::new()));
+    if let Ok(mut guard) = lock.lock() {
+        *guard = types;
+    }
+}
+
+pub fn known_module_types() -> Vec<String> {
+    KNOWN_MODULE_TYPES
+        .get()
+        .and_then(|lock| lock.lock().ok().map(|v| v.clone()))
+        .unwrap_or_default()
+}
 
 pub fn load_config() -> Config {
     let config_path = get_config_path();
@@ -52,6 +68,11 @@ pub fn load_config() -> Config {
             errors.len(),
             warnings.len()
         );
+    }
+
+    if !errors.is_empty() {
+        log::error!("Config has errors; refusing to start with invalid configuration.");
+        std::process::exit(1);
     }
 
     config

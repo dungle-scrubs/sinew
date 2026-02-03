@@ -57,10 +57,179 @@ pub use window_title::WindowTitleModule;
 use gpui::AnyElement;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
 use crate::config::{parse_hex_color, ModuleConfig};
 use crate::gpui_app::theme::Theme;
+
+type ModuleFactory = fn(&str, &ModuleConfig) -> Option<Box<dyn GpuiModule>>;
+
+static MODULE_FACTORIES: OnceLock<Mutex<HashMap<String, ModuleFactory>>> = OnceLock::new();
+static POPUP_CONFIGS: OnceLock<RwLock<HashMap<String, PopupConfig>>> = OnceLock::new();
+
+fn module_factories() -> &'static Mutex<HashMap<String, ModuleFactory>> {
+    MODULE_FACTORIES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+pub fn register_module_factory(module_type: &str, factory: ModuleFactory) {
+    let mut guard = module_factories().lock().unwrap();
+    guard.insert(module_type.to_string(), factory);
+}
+
+pub fn registered_module_types() -> Vec<String> {
+    let guard = module_factories().lock().unwrap();
+    let mut keys: Vec<String> = guard.keys().cloned().collect();
+    keys.sort();
+    keys
+}
+
+fn ensure_builtin_factories() {
+    static INIT: OnceLock<()> = OnceLock::new();
+    INIT.get_or_init(|| {
+        register_module_factory("clock", |id, config| {
+            let format = config.format.as_deref().unwrap_or("%a %b %d  %H:%M:%S");
+            Some(Box::new(ClockModule::new(id, format)))
+        });
+        register_module_factory("date", |id, config| {
+            let format = config.format.as_deref().unwrap_or("%a %b %d");
+            Some(Box::new(DateModule::new(id, format)))
+        });
+        register_module_factory("datetime", |id, config| {
+            let date_format = config.date_format.as_deref().unwrap_or("%a %b %d");
+            let time_format = config.time_format.as_deref().unwrap_or("%H:%M");
+            Some(Box::new(DateTimeModule::new(id, date_format, time_format)))
+        });
+        register_module_factory("battery", |id, config| {
+            Some(Box::new(BatteryModule::new(id, config.label.as_deref())))
+        });
+        register_module_factory("cpu", |id, config| {
+            let label_align = parse_label_align(config.label_align.as_deref());
+            let fixed_width = config.value_fixed_width.unwrap_or(true);
+            Some(Box::new(CpuModule::new(
+                id,
+                config.label.as_deref(),
+                label_align,
+                fixed_width,
+            )))
+        });
+        register_module_factory("temperature", |id, config| {
+            let label_align = parse_label_align(config.label_align.as_deref());
+            let unit = parse_temp_unit(config.temp_unit.as_deref());
+            let fixed_width = config.value_fixed_width.unwrap_or(true);
+            Some(Box::new(TemperatureModule::new(
+                id,
+                config.label.as_deref(),
+                label_align,
+                unit,
+                fixed_width,
+            )))
+        });
+        register_module_factory("temp", |id, config| {
+            let label_align = parse_label_align(config.label_align.as_deref());
+            let unit = parse_temp_unit(config.temp_unit.as_deref());
+            let fixed_width = config.value_fixed_width.unwrap_or(true);
+            Some(Box::new(TemperatureModule::new(
+                id,
+                config.label.as_deref(),
+                label_align,
+                unit,
+                fixed_width,
+            )))
+        });
+        register_module_factory("memory", |id, config| {
+            let label_align = parse_label_align(config.label_align.as_deref());
+            let fixed_width = config.value_fixed_width.unwrap_or(true);
+            Some(Box::new(MemoryModule::new(
+                id,
+                config.label.as_deref(),
+                label_align,
+                fixed_width,
+            )))
+        });
+        register_module_factory("disk", |id, config| {
+            let path = config.path.as_deref().unwrap_or("/");
+            let label_align = parse_label_align(config.label_align.as_deref());
+            let fixed_width = config.value_fixed_width.unwrap_or(false);
+            Some(Box::new(DiskModule::new(
+                id,
+                path,
+                config.label.as_deref(),
+                label_align,
+                fixed_width,
+            )))
+        });
+        register_module_factory("network", |id, _config| Some(Box::new(WifiModule::new(id))));
+        register_module_factory("wifi", |id, _config| Some(Box::new(WifiModule::new(id))));
+        register_module_factory("volume", |id, _config| {
+            Some(Box::new(VolumeModule::new(id)))
+        });
+        register_module_factory("app_name", |id, config| {
+            let max_len = config.max_length.map(|v| v as usize).unwrap_or(30);
+            Some(Box::new(AppNameModule::new(id, max_len)))
+        });
+        register_module_factory("window_title", |id, config| {
+            let max_len = config.max_length.map(|v| v as usize).unwrap_or(50);
+            Some(Box::new(WindowTitleModule::new(id, max_len)))
+        });
+        register_module_factory("now_playing", |id, config| {
+            let max_len = config.max_length.map(|v| v as usize).unwrap_or(40);
+            Some(Box::new(NowPlayingModule::new(id, max_len)))
+        });
+        register_module_factory("news", |id, _config| Some(Box::new(NewsModule::new(id))));
+        register_module_factory("api_usage", |id, _config| {
+            Some(Box::new(ApiUsageModule::new(id)))
+        });
+        register_module_factory("script", |id, config| {
+            let command = config.command.as_deref().unwrap_or("echo 'no command'");
+            let interval = config.interval.map(|v| v as u64);
+            let icon = config.icon.as_deref();
+            Some(Box::new(ScriptModule::new(id, command, interval, icon)))
+        });
+        register_module_factory("weather", |id, config| {
+            let location = config.location.as_deref().unwrap_or("auto");
+            let interval = config.update_interval.unwrap_or(600);
+            Some(Box::new(WeatherModule::new(id, location, interval)))
+        });
+        register_module_factory("static", |id, config| {
+            let text = config.text.as_deref().unwrap_or("");
+            let icon = config.icon.as_deref();
+            Some(Box::new(StaticTextModule::new(id, text, icon)))
+        });
+        register_module_factory("separator", |id, config| {
+            let sep_type = config.separator_type.as_deref().unwrap_or("space");
+            let width = config.separator_width.unwrap_or(8.0) as f32;
+            Some(Box::new(SeparatorModule::new(id, sep_type, width)))
+        });
+        register_module_factory("demo", |id, _config| Some(Box::new(DemoModule::new(id))));
+        register_module_factory("skeleton", |id, _config| {
+            Some(Box::new(SkeletonDemoModule::new(id)))
+        });
+        register_module_factory("hisohiso", |id, _config| {
+            Some(Box::new(HisohisoModule::new(id)))
+        });
+    });
+}
+
+pub fn init_module_factories() {
+    ensure_builtin_factories();
+}
+
+fn popup_config_map() -> &'static RwLock<HashMap<String, PopupConfig>> {
+    POPUP_CONFIGS.get_or_init(|| RwLock::new(HashMap::new()))
+}
+
+pub fn get_popup_config(id: &str) -> Option<PopupConfig> {
+    popup_config_map()
+        .read()
+        .ok()
+        .and_then(|map| map.get(id).cloned())
+}
+
+pub fn clear_popup_configs() {
+    if let Ok(mut map) = popup_config_map().write() {
+        map.clear();
+    }
+}
 
 /// Popup type determines window behavior.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -283,6 +452,10 @@ pub struct PositionedModule {
     pub min_width: Option<f32>,
     /// Maximum width for flex modules
     pub max_width: Option<f32>,
+    /// Left margin in pixels
+    pub margin_left: Option<f32>,
+    /// Right margin in pixels
+    pub margin_right: Option<f32>,
 }
 
 /// Truncates text to a maximum number of characters, adding an ellipsis if truncated.
@@ -315,114 +488,17 @@ fn parse_temp_unit(unit: Option<&str>) -> temperature::TemperatureUnit {
 
 /// Creates a module from configuration.
 pub fn create_module(config: &ModuleConfig, index: usize) -> Option<PositionedModule> {
+    ensure_builtin_factories();
     let id = config
         .id
         .clone()
         .unwrap_or_else(|| format!("{}-{}", config.module_type, index));
 
-    let module: Option<Box<dyn GpuiModule>> = match config.module_type.as_str() {
-        "clock" => {
-            let format = config.format.as_deref().unwrap_or("%a %b %d  %H:%M:%S");
-            Some(Box::new(ClockModule::new(&id, format)))
-        }
-        "date" => {
-            let format = config.format.as_deref().unwrap_or("%a %b %d");
-            Some(Box::new(DateModule::new(&id, format)))
-        }
-        "datetime" => {
-            let date_format = config.date_format.as_deref().unwrap_or("%a %b %d");
-            let time_format = config.time_format.as_deref().unwrap_or("%H:%M");
-            Some(Box::new(DateTimeModule::new(&id, date_format, time_format)))
-        }
-        "battery" => Some(Box::new(BatteryModule::new(&id, config.label.as_deref()))),
-        "volume" => Some(Box::new(VolumeModule::new(&id))),
-        "cpu" => {
-            let label_align = parse_label_align(config.label_align.as_deref());
-            let fixed_width = config.value_fixed_width.unwrap_or(true);
-            Some(Box::new(CpuModule::new(
-                &id,
-                config.label.as_deref(),
-                label_align,
-                fixed_width,
-            )))
-        }
-        "temperature" | "temp" => {
-            let label_align = parse_label_align(config.label_align.as_deref());
-            let unit = parse_temp_unit(config.temp_unit.as_deref());
-            let fixed_width = config.value_fixed_width.unwrap_or(true);
-            Some(Box::new(TemperatureModule::new(
-                &id,
-                config.label.as_deref(),
-                label_align,
-                unit,
-                fixed_width,
-            )))
-        }
-        "memory" => {
-            let label_align = parse_label_align(config.label_align.as_deref());
-            let fixed_width = config.value_fixed_width.unwrap_or(true);
-            Some(Box::new(MemoryModule::new(
-                &id,
-                config.label.as_deref(),
-                label_align,
-                fixed_width,
-            )))
-        }
-        "disk" => {
-            let path = config.path.as_deref().unwrap_or("/");
-            let label_align = parse_label_align(config.label_align.as_deref());
-            let fixed_width = config.value_fixed_width.unwrap_or(false);
-            Some(Box::new(DiskModule::new(
-                &id,
-                path,
-                config.label.as_deref(),
-                label_align,
-                fixed_width,
-            )))
-        }
-        "wifi" => Some(Box::new(WifiModule::new(&id))),
-        "app_name" => {
-            let max_len = config.max_length.map(|v| v as usize).unwrap_or(30);
-            Some(Box::new(AppNameModule::new(&id, max_len)))
-        }
-        "window_title" => {
-            let max_len = config.max_length.map(|v| v as usize).unwrap_or(50);
-            Some(Box::new(WindowTitleModule::new(&id, max_len)))
-        }
-        "now_playing" => {
-            let max_len = config.max_length.map(|v| v as usize).unwrap_or(40);
-            Some(Box::new(NowPlayingModule::new(&id, max_len)))
-        }
-        "weather" => {
-            let location = config.location.as_deref().unwrap_or("auto");
-            let interval = config.update_interval.unwrap_or(600);
-            Some(Box::new(WeatherModule::new(&id, location, interval)))
-        }
-        "news" => Some(Box::new(NewsModule::new(&id))),
-        "api_usage" => Some(Box::new(ApiUsageModule::new(&id))),
-        "script" => {
-            let command = config.command.as_deref().unwrap_or("echo 'no command'");
-            let interval = config.interval.map(|v| v as u64);
-            let icon = config.icon.as_deref();
-            Some(Box::new(ScriptModule::new(&id, command, interval, icon)))
-        }
-        "static" => {
-            let text = config.text.as_deref().unwrap_or("");
-            let icon = config.icon.as_deref();
-            Some(Box::new(StaticTextModule::new(&id, text, icon)))
-        }
-        "separator" => {
-            let sep_type = config.separator_type.as_deref().unwrap_or("space");
-            let width = config.separator_width.unwrap_or(8.0) as f32;
-            Some(Box::new(SeparatorModule::new(&id, sep_type, width)))
-        }
-        "demo" => Some(Box::new(DemoModule::new(&id))),
-        "hisohiso" => Some(Box::new(HisohisoModule::new(&id))),
-        "skeleton" => Some(Box::new(SkeletonDemoModule::new(&id))),
-        unknown => {
-            log::warn!("Unknown module type: {}", unknown);
-            None
-        }
+    let module = {
+        let factories = module_factories().lock().unwrap();
+        factories
+            .get(&config.module_type)
+            .and_then(|factory| factory(&id, config))
     };
 
     // Parse style
@@ -456,9 +532,15 @@ pub fn create_module(config: &ModuleConfig, index: usize) -> Option<PositionedMo
             anchor,
         }
     });
+    if let Some(ref popup_cfg) = popup {
+        if let Ok(mut map) = popup_config_map().write() {
+            let target_id = popup_cfg.popup_type.clone().unwrap_or_else(|| id.clone());
+            map.insert(target_id, popup_cfg.clone());
+        }
+    }
 
-    module.map(|m| PositionedModule {
-        module: m,
+    module.map(|module| PositionedModule {
+        module,
         style,
         text_color,
         click_command: config.click_command.clone(),
@@ -471,6 +553,8 @@ pub fn create_module(config: &ModuleConfig, index: usize) -> Option<PositionedMo
         flex: config.flex,
         min_width: config.min_width.map(|v| v as f32),
         max_width: config.max_width.map(|v| v as f32),
+        margin_left: config.margin_left.map(|v| v as f32),
+        margin_right: config.margin_right.map(|v| v as f32),
     })
 }
 
@@ -615,5 +699,18 @@ pub fn dispatch_popup_event(module_id: &str, event: PopupEvent) {
 
 /// Gets the popup spec for a module.
 pub fn get_popup_spec(id: &str) -> Option<PopupSpec> {
-    get_module(id).and_then(|m| m.read().ok().and_then(|e| e.popup_spec()))
+    let spec = get_module(id).and_then(|m| m.read().ok().and_then(|e| e.popup_spec()));
+    let Some(mut spec) = spec else {
+        return None;
+    };
+    if let Some(cfg) = get_popup_config(id) {
+        if cfg.width > 0.0 {
+            spec.width = cfg.width as f64;
+        }
+        if cfg.height > 0.0 {
+            spec.height = cfg.height as f64;
+        }
+        spec.anchor = cfg.anchor;
+    }
+    Some(spec)
 }

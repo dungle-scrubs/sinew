@@ -1,7 +1,8 @@
 use serde::Deserialize;
+use std::collections::HashMap;
 
-/// Known module types
-const KNOWN_MODULE_TYPES: &[&str] = &[
+/// Known module types (fallback when registry not initialized)
+const DEFAULT_MODULE_TYPES: &[&str] = &[
     "clock",
     "date",
     "datetime",
@@ -25,6 +26,7 @@ const KNOWN_MODULE_TYPES: &[&str] = &[
     "weather",
     "separator",
     "skeleton",
+    "hisohiso",
 ];
 
 /// Known separator types
@@ -205,6 +207,9 @@ pub struct ModuleConfig {
     pub skeleton_width: Option<f64>,
     /// Height for skeleton module
     pub skeleton_height: Option<f64>,
+    /// Extra module-specific configuration for custom modules
+    #[serde(flatten, default)]
+    pub extras: HashMap<String, toml::Value>,
 }
 
 fn default_show_while_loading() -> bool {
@@ -294,13 +299,17 @@ impl ModulesConfig {
 impl ModuleConfig {
     fn validate(&self, path: &str, issues: &mut Vec<ConfigIssue>) {
         // Validate module type
-        if !KNOWN_MODULE_TYPES.contains(&self.module_type.as_str()) {
+        let mut known = crate::config::known_module_types();
+        if known.is_empty() {
+            known = DEFAULT_MODULE_TYPES.iter().map(|s| s.to_string()).collect();
+        }
+        if !known.iter().any(|t| t == &self.module_type) {
             issues.push(ConfigIssue {
                 path: format!("{}.type", path),
                 message: format!(
                     "unknown module type '{}', expected one of: {}",
                     self.module_type,
-                    KNOWN_MODULE_TYPES.join(", ")
+                    known.join(", ")
                 ),
                 is_error: true,
             });
@@ -743,6 +752,41 @@ pub fn parse_hex_color(hex: &str) -> Option<(f64, f64, f64, f64)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn collects_unknown_module_fields_into_extras() {
+        let config: Config = toml::from_str(
+            r#"
+[modules.left]
+left = [{ type = "clock", custom_key = "custom_value" }]
+"#,
+        )
+        .expect("config should parse");
+
+        let module = &config.modules.left.outer[0];
+        let value = module
+            .extras
+            .get("custom_key")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+        assert_eq!(value, "custom_value");
+    }
+
+    #[test]
+    fn validates_unknown_module_type_as_error() {
+        let config: Config = toml::from_str(
+            r#"
+[modules.left]
+left = [{ type = "not_a_real_module" }]
+"#,
+        )
+        .expect("config should parse");
+
+        let issues = config.validate();
+        assert!(issues
+            .iter()
+            .any(|issue| { issue.is_error && issue.path.ends_with(".type") }));
+    }
 
     #[test]
     fn test_parse_hex_color() {

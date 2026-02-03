@@ -525,8 +525,8 @@ pub fn create_module(config: &ModuleConfig, index: usize) -> Option<PositionedMo
         };
         PopupConfig {
             popup_type: Some(popup_type.clone()),
-            width: config.popup_width.unwrap_or(200.0) as f32,
-            height: config.popup_height.unwrap_or(280.0) as f32,
+            width: config.popup_width.unwrap_or(0.0) as f32,
+            height: config.popup_height.unwrap_or(0.0) as f32,
             max_height_percent: config.popup_max_height.unwrap_or(50.0).clamp(0.0, 100.0) as f32,
             command: config.popup_command.clone(),
             anchor,

@@ -123,7 +123,7 @@ fn clamp_popup_height(spec_height: f64, max_height: f64) -> f64 {
 }
 
 impl Render for PopupHostView {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> AnyElement {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         let render_start = Instant::now();
         let current_id = crate::gpui_app::popup_manager::get_current_module_id();
         let current_matches = get_popup_spec(&current_id)

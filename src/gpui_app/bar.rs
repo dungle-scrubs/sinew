@@ -1,13 +1,14 @@
 //! GPUI bar view implementation.
 
+use async_channel::{Receiver, Sender};
+use futures_util::future::FutureExt;
+use futures_util::{pin_mut, select};
 use gpui::{
     div, prelude::*, px, Context, MouseButton, ParentElement, Styled, Task, WeakEntity, Window,
 };
-use objc2_app_kit::NSEvent;
-use std::io::Write;
 use std::process::Command;
 use std::ptr::NonNull;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::OnceLock;
 use std::sync::RwLock;
 use std::sync::{Arc, Mutex};
@@ -19,7 +20,8 @@ use crate::gpui_app::modules::{create_module, PositionedModule};
 use crate::gpui_app::theme::Theme;
 
 /// Global registry of all bar views for synchronized updates
-static BAR_VIEWS: Mutex<Vec<WeakEntity<BarView>>> = Mutex::new(Vec::new());
+static BAR_VIEWS: Mutex<Vec<(u64, WeakEntity<BarView>)>> = Mutex::new(Vec::new());
+static BAR_VIEW_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 /// Flag to ensure only one refresh task runs globally
 static REFRESH_TASK_STARTED: AtomicBool = AtomicBool::new(false);
@@ -38,9 +40,50 @@ fn auto_popup_id() -> Option<String> {
 
 /// Flag set when active application changes (checked by refresh task)
 static APP_CHANGED: AtomicBool = AtomicBool::new(false);
+static BAR_UPDATE_REQUESTED: AtomicBool = AtomicBool::new(false);
+static REFRESH_PENDING: AtomicBool = AtomicBool::new(false);
+
+static REFRESH_BUS: OnceLock<RefreshBus> = OnceLock::new();
+
+struct RefreshBus {
+    subscribers: Mutex<Vec<Sender<()>>>,
+}
+
+impl RefreshBus {
+    fn new() -> Self {
+        Self {
+            subscribers: Mutex::new(Vec::new()),
+        }
+    }
+
+    fn subscribe(&self) -> Receiver<()> {
+        let (tx, rx) = async_channel::unbounded();
+        self.subscribers.lock().unwrap().push(tx);
+        rx
+    }
+
+    fn notify(&self) {
+        let mut subscribers = self.subscribers.lock().unwrap();
+        subscribers.retain(|tx| tx.try_send(()).is_ok());
+    }
+}
+
+fn refresh_bus() -> &'static RefreshBus {
+    REFRESH_BUS.get_or_init(RefreshBus::new)
+}
+
+/// Request an immediate bar refresh (called from modules that need fast updates)
+pub fn request_immediate_refresh() {
+    BAR_UPDATE_REQUESTED.store(true, Ordering::Relaxed);
+    if REFRESH_PENDING.swap(true, Ordering::Relaxed) {
+        return;
+    }
+    refresh_bus().notify();
+}
 
 /// The main menu bar view rendered with GPUI.
 pub struct BarView {
+    id: u64,
     config: SharedConfig,
     config_watcher: Option<ConfigWatcher>,
     config_version: u64,
@@ -77,6 +120,7 @@ impl BarView {
 
         let update_interval = Duration::from_millis(500);
         Self {
+            id: BAR_VIEW_COUNTER.fetch_add(1, Ordering::Relaxed),
             config: shared_config,
             config_watcher,
             config_version: 0,
@@ -103,8 +147,10 @@ impl BarView {
 
         // Register this bar view in the global registry
         let weak_self = cx.weak_entity();
+        let id = self.id;
         if let Ok(mut views) = BAR_VIEWS.lock() {
-            views.push(weak_self.clone());
+            views.retain(|(_, view)| view.upgrade().is_some());
+            views.push((id, weak_self.clone()));
             log::info!("Registered bar view ({} total)", views.len());
         }
 
@@ -121,34 +167,59 @@ impl BarView {
         setup_workspace_observer();
 
         // Start the global refresh task
+        let refresh_rx = refresh_bus().subscribe();
         let task = cx.spawn(async move |_, cx| {
             let mut last_camera_active = camera::is_camera_active();
 
             loop {
-                // Poll every second for camera state changes
-                cx.background_executor().timer(Duration::from_secs(1)).await;
-
                 let mut should_refresh = false;
+                let refresh_fut = refresh_rx.recv().fuse();
+                let timer_fut = cx
+                    .background_executor()
+                    .timer(Duration::from_secs(1))
+                    .fuse();
+                pin_mut!(refresh_fut, timer_fut);
 
-                // Check if camera state changed
-                let current_active = camera::is_camera_active();
-                if current_active != last_camera_active {
-                    log::info!(
-                        "Camera state changed: {} -> {}",
-                        last_camera_active,
-                        current_active
-                    );
-                    last_camera_active = current_active;
-                    should_refresh = true;
+                select! {
+                    signal = refresh_fut => {
+                        if signal.is_ok() {
+                            should_refresh = true;
+                        }
+                    }
+                    _ = timer_fut => {
+                        let current_active = camera::is_camera_active();
+                        if current_active != last_camera_active {
+                            log::info!(
+                                "Camera state changed: {} -> {}",
+                                last_camera_active,
+                                current_active
+                            );
+                            last_camera_active = current_active;
+                            should_refresh = true;
+                        }
+                        if APP_CHANGED.swap(false, Ordering::SeqCst) {
+                            log::debug!("Active app changed, refreshing");
+                            should_refresh = true;
+                        }
+                    }
                 }
 
-                // Check if active app changed (set by workspace observer)
-                if APP_CHANGED.swap(false, Ordering::SeqCst) {
-                    log::debug!("Active app changed, refreshing");
-                    should_refresh = true;
+                let view_count = if let Ok(mut views) = BAR_VIEWS.lock() {
+                    views.retain(|(_, view)| view.upgrade().is_some());
+                    views.len()
+                } else {
+                    0
+                };
+
+                if view_count == 0 {
+                    REFRESH_TASK_STARTED.store(false, Ordering::SeqCst);
+                    REFRESH_PENDING.store(false, Ordering::Relaxed);
+                    log::info!("Stopping global refresh task (no bar views)");
+                    break;
                 }
 
                 if should_refresh {
+                    REFRESH_PENDING.store(false, Ordering::Relaxed);
                     let _ = cx.refresh();
                 }
             }
@@ -156,6 +227,14 @@ impl BarView {
 
         self.refresh_task = Some(task);
         log::info!("Started global refresh task");
+    }
+}
+
+impl Drop for BarView {
+    fn drop(&mut self) {
+        if let Ok(mut views) = BAR_VIEWS.lock() {
+            views.retain(|(id, _)| *id != self.id);
+        }
     }
 }
 
@@ -266,91 +345,23 @@ impl BarView {
     fn update_modules(&mut self) -> bool {
         let mut changed = false;
         for pm in &mut self.left_outer_modules {
-            let start = Instant::now();
             if pm.module.update() {
                 changed = true;
-            }
-            let took = start.elapsed();
-            if std::env::var("RUSTYBAR_TRACE_POPUP").is_ok() && took > Duration::from_millis(20) {
-                if let Ok(mut file) = std::fs::OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open("/tmp/rustybar_popup_trace.log")
-                {
-                    let _ = writeln!(
-                        file,
-                        "{} bar update module='{}' took={:?}",
-                        chrono::Utc::now().to_rfc3339(),
-                        pm.module.id(),
-                        took
-                    );
-                }
             }
         }
         for pm in &mut self.left_inner_modules {
-            let start = Instant::now();
             if pm.module.update() {
                 changed = true;
-            }
-            let took = start.elapsed();
-            if std::env::var("RUSTYBAR_TRACE_POPUP").is_ok() && took > Duration::from_millis(20) {
-                if let Ok(mut file) = std::fs::OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open("/tmp/rustybar_popup_trace.log")
-                {
-                    let _ = writeln!(
-                        file,
-                        "{} bar update module='{}' took={:?}",
-                        chrono::Utc::now().to_rfc3339(),
-                        pm.module.id(),
-                        took
-                    );
-                }
             }
         }
         for pm in &mut self.right_outer_modules {
-            let start = Instant::now();
             if pm.module.update() {
                 changed = true;
-            }
-            let took = start.elapsed();
-            if std::env::var("RUSTYBAR_TRACE_POPUP").is_ok() && took > Duration::from_millis(20) {
-                if let Ok(mut file) = std::fs::OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open("/tmp/rustybar_popup_trace.log")
-                {
-                    let _ = writeln!(
-                        file,
-                        "{} bar update module='{}' took={:?}",
-                        chrono::Utc::now().to_rfc3339(),
-                        pm.module.id(),
-                        took
-                    );
-                }
             }
         }
         for pm in &mut self.right_inner_modules {
-            let start = Instant::now();
             if pm.module.update() {
                 changed = true;
-            }
-            let took = start.elapsed();
-            if std::env::var("RUSTYBAR_TRACE_POPUP").is_ok() && took > Duration::from_millis(20) {
-                if let Ok(mut file) = std::fs::OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open("/tmp/rustybar_popup_trace.log")
-                {
-                    let _ = writeln!(
-                        file,
-                        "{} bar update module='{}' took={:?}",
-                        chrono::Utc::now().to_rfc3339(),
-                        pm.module.id(),
-                        took
-                    );
-                }
             }
         }
         changed
@@ -408,34 +419,6 @@ impl BarView {
                 // Use extension-based popup toggle
                 let extension_id = popup_type.as_deref().unwrap_or("demo");
                 log::info!("Module clicked, toggling extension popup: {}", extension_id);
-                if std::env::var("RUSTYBAR_TRACE_POPUP").is_ok() {
-                    if let Ok(mut file) = std::fs::OpenOptions::new()
-                        .create(true)
-                        .append(true)
-                        .open("/tmp/rustybar_popup_trace.log")
-                    {
-                        let mouse_pos = NSEvent::mouseLocation();
-                        let bounds = window.bounds();
-                        let click_x: f64 = (bounds.origin.x + event.position.x).into();
-                        let click_y: f64 = (bounds.origin.y + event.position.y).into();
-                        let global_delay = crate::gpui_app::popup_manager::global_click_delay_ms()
-                            .map(|v| v as i64)
-                            .unwrap_or(-1);
-                        let _ = writeln!(
-                            file,
-                            "{} bar click -> toggle '{}' mouse=({:.1},{:.1}) click=({:.1},{:.1}) win_origin=({:.1},{:.1}) global_delay_ms={}",
-                            chrono::Utc::now().to_rfc3339(),
-                            extension_id,
-                            mouse_pos.x,
-                            mouse_pos.y,
-                            click_x,
-                            click_y,
-                            f64::from(bounds.origin.x),
-                            f64::from(bounds.origin.y),
-                            global_delay
-                        );
-                    }
-                }
                 let bounds = window.bounds();
                 let click_x: f64 = (bounds.origin.x + event.position.x).into();
                 let click_y: f64 = (bounds.origin.y + event.position.y).into();
@@ -492,29 +475,13 @@ impl Render for BarView {
 
         // Update modules periodically (rate-limited to every 500ms).
         // Skip updates while a popup is visible to keep the UI responsive.
-        if self.last_update.elapsed() > self.update_interval
-            && !crate::gpui_app::popup_manager::is_popup_visible()
+        let needs_immediate = BAR_UPDATE_REQUESTED.swap(false, Ordering::Relaxed);
+        if needs_immediate
+            || (self.last_update.elapsed() > self.update_interval
+                && !crate::gpui_app::popup_manager::is_popup_visible())
         {
-            let update_start = Instant::now();
             if self.update_modules() {
                 cx.notify(); // Trigger re-render if any module changed
-            }
-            let update_took = update_start.elapsed();
-            if std::env::var("RUSTYBAR_TRACE_POPUP").is_ok()
-                && update_took > Duration::from_millis(20)
-            {
-                if let Ok(mut file) = std::fs::OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open("/tmp/rustybar_popup_trace.log")
-                {
-                    let _ = writeln!(
-                        file,
-                        "{} bar update batch took={:?}",
-                        chrono::Utc::now().to_rfc3339(),
-                        update_took
-                    );
-                }
             }
             self.last_update = Instant::now();
         }

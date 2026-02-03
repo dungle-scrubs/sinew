@@ -14,10 +14,10 @@ use objc2::MainThreadMarker;
 use objc2_app_kit::{NSApplication, NSEvent, NSEventMask};
 use objc2_foundation::{NSNotification, NSNotificationCenter, NSNotificationName, NSRunLoop};
 use std::cell::RefCell;
-use std::io::Write;
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
+use std::sync::atomic::{AtomicI64, Ordering as AtomicIOrdering};
 use std::sync::OnceLock;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
@@ -52,6 +52,8 @@ static LAST_GLOBAL_CLICK_MS: AtomicU64 = AtomicU64::new(0);
 static SCREEN_HEIGHT: OnceLock<Mutex<f64>> = OnceLock::new();
 static SCREEN_WIDTH: OnceLock<Mutex<f64>> = OnceLock::new();
 static SCREEN_BAR_HEIGHT: OnceLock<Mutex<f64>> = OnceLock::new();
+static PANEL_WINDOW_NUMBER: AtomicI64 = AtomicI64::new(0);
+static POPUP_WINDOW_NUMBER: AtomicI64 = AtomicI64::new(0);
 
 struct ModuleChangeBus {
     subscribers: Mutex<Vec<Sender<String>>>,
@@ -113,6 +115,39 @@ pub fn set_bar_height(height: f64) {
     }
 }
 
+pub(crate) fn set_window_number(popup_type: PopupType, number: i64) {
+    match popup_type {
+        PopupType::Panel => {
+            PANEL_WINDOW_NUMBER.store(number, AtomicIOrdering::SeqCst);
+        }
+        PopupType::Popup => {
+            POPUP_WINDOW_NUMBER.store(number, AtomicIOrdering::SeqCst);
+        }
+    }
+}
+
+fn stored_window_number(popup_type: PopupType) -> i64 {
+    match popup_type {
+        PopupType::Panel => PANEL_WINDOW_NUMBER.load(AtomicIOrdering::SeqCst),
+        PopupType::Popup => POPUP_WINDOW_NUMBER.load(AtomicIOrdering::SeqCst),
+    }
+}
+
+fn width_matches_popup_type(popup_type: PopupType, width: f64) -> bool {
+    match popup_type {
+        PopupType::Panel => width > 500.0,
+        PopupType::Popup => width > 200.0 && width < 500.0,
+    }
+}
+
+#[cfg(test)]
+fn matches_window_for_test(popup_type: PopupType, stored: i64, window_number: i64, width: f64) -> bool {
+    if stored > 0 {
+        return stored == window_number;
+    }
+    width_matches_popup_type(popup_type, width)
+}
+
 fn bar_height() -> f64 {
     let lock = SCREEN_BAR_HEIGHT.get_or_init(|| Mutex::new(32.0));
     lock.lock().map(|v| *v).unwrap_or(32.0)
@@ -153,6 +188,32 @@ fn reset_module_change_bus_for_test() {
     }
 }
 
+#[cfg(test)]
+mod popup_height_tests {
+    use super::{
+        max_panel_height, max_popup_height, set_bar_height, set_screen_height, set_screen_width,
+    };
+
+    #[test]
+    fn max_panel_height_respects_bar_height() {
+        set_screen_width(1440.0);
+        set_screen_height(1000.0);
+        set_bar_height(40.0);
+        let panel = max_panel_height();
+        assert!((panel - (1000.0 - 40.0)).abs() < 0.1);
+    }
+
+    #[test]
+    fn max_popup_height_is_smaller_than_panel() {
+        set_screen_width(1440.0);
+        set_screen_height(900.0);
+        set_bar_height(30.0);
+        let panel = max_panel_height();
+        let popup = max_popup_height();
+        assert!(popup <= panel);
+    }
+}
+
 pub(crate) trait WindowOps: Send + Sync {
     fn show_popup_window(&self, popup_type: PopupType, height: f64) -> bool;
     fn hide_all_popup_windows(&self);
@@ -181,22 +242,12 @@ pub fn set_window_ops_for_test(ops: Arc<dyn WindowOps>) {
     *lock.lock().unwrap() = ops;
 }
 
-fn trace_enabled() -> bool {
-    static TRACE_ENABLED: OnceLock<bool> = OnceLock::new();
-    *TRACE_ENABLED.get_or_init(|| std::env::var("RUSTYBAR_TRACE_POPUP").is_ok())
+fn trace_popup(msg: &str) {
+    let _ = msg;
 }
 
-fn trace_popup(msg: &str) {
-    if !trace_enabled() {
-        return;
-    }
-    if let Ok(mut file) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open("/tmp/rustybar_popup_trace.log")
-    {
-        let _ = writeln!(file, "{} {}", chrono::Utc::now().to_rfc3339(), msg);
-    }
+fn trace_enabled() -> bool {
+    false
 }
 
 fn now_millis() -> u64 {
@@ -465,7 +516,9 @@ pub fn reposition_popup_window(popup_type: PopupType, height: f64) {
 
     let app = NSApplication::sharedApplication(mtm);
     let windows = app.windows();
-
+    let stored_number = stored_window_number(popup_type);
+    let mut fallback_index: Option<usize> = None;
+    let mut match_index: Option<usize> = None;
     // Find bar window to get screen info
     let mut bar_y = 0.0;
     let mut screen_width = 1512.0;
@@ -482,47 +535,74 @@ pub fn reposition_popup_window(popup_type: PopupType, height: f64) {
     for i in 0..windows.len() {
         let ns_window = windows.objectAtIndex(i);
         let frame = ns_window.frame();
+        let window_number = ns_window.windowNumber() as i64;
 
         // Skip the bar window (height ~32px)
         if frame.size.height <= 40.0 && frame.size.height > 20.0 {
             continue;
         }
 
-        // Match window by type (check width - panel is full-width, popup is narrow)
-        let is_panel = frame.size.width > 500.0;
-        let is_popup = frame.size.width > 200.0 && frame.size.width < 500.0;
-
-        let matches = match popup_type {
-            PopupType::Panel => is_panel,
-            PopupType::Popup => is_popup,
-        };
-
-        if matches {
-            let max_height = match popup_type {
-                PopupType::Panel => max_panel_height(),
-                PopupType::Popup => max_popup_height(),
-            };
-            let clamped_height = height.min(max_height);
-            let new_width = frame.size.width;
-            let new_y = bar_y - clamped_height;
-            let mut new_x = frame.origin.x;
-
-            if popup_type == PopupType::Popup {
-                // Keep popup on screen after height change.
-                if new_x < 0.0 {
-                    new_x = 0.0;
-                } else if new_x + new_width > screen_width {
-                    new_x = screen_width - new_width;
-                }
+        if stored_number > 0 {
+            if window_number == stored_number {
+                match_index = Some(i);
+                break;
             }
-
-            let new_frame = objc2_foundation::NSRect::new(
-                objc2_foundation::NSPoint::new(new_x, new_y),
-                objc2_foundation::NSSize::new(new_width, clamped_height),
-            );
-            ns_window.setFrame_display(new_frame, false);
-            return;
+            if fallback_index.is_none() && width_matches_popup_type(popup_type, frame.size.width) {
+                fallback_index = Some(i);
+            }
+            continue;
         }
+
+        if width_matches_popup_type(popup_type, frame.size.width) {
+            match_index = Some(i);
+            break;
+        }
+    }
+
+    let selected_index = if match_index.is_none() && stored_number > 0 {
+        fallback_index
+    } else {
+        match_index
+    };
+
+    if let Some(i) = selected_index {
+        let ns_window = windows.objectAtIndex(i);
+        let frame = ns_window.frame();
+        let window_number = ns_window.windowNumber() as i64;
+        if stored_number == 0 || (match_index.is_none() && fallback_index.is_some()) {
+            set_window_number(popup_type, window_number);
+        } else if match_index.is_none() && fallback_index.is_some() {
+            log::warn!(
+                "Popup window number mismatch for {:?}; using fallback window {}",
+                popup_type,
+                window_number
+            );
+        }
+
+        let max_height = match popup_type {
+            PopupType::Panel => max_panel_height(),
+            PopupType::Popup => max_popup_height(),
+        };
+        let clamped_height = height.min(max_height);
+        let new_width = frame.size.width;
+        let new_y = bar_y - clamped_height;
+        let mut new_x = frame.origin.x;
+
+        if popup_type == PopupType::Popup {
+            // Keep popup on screen after height change.
+            if new_x < 0.0 {
+                new_x = 0.0;
+            } else if new_x + new_width > screen_width {
+                new_x = screen_width - new_width;
+            }
+        }
+
+        let new_frame = objc2_foundation::NSRect::new(
+            objc2_foundation::NSPoint::new(new_x, new_y),
+            objc2_foundation::NSSize::new(new_width, clamped_height),
+        );
+        ns_window.setFrame_display(new_frame, false);
+        return;
     }
 }
 
@@ -582,16 +662,15 @@ pub fn toggle_popup(module_id: &str) -> bool {
         }
     };
 
-    // Update state
-    if let Ok(mut id) = CURRENT_MODULE_ID.write() {
-        // Notify old module of close
-        if !id.is_empty() {
-            if let Some(m) = get_module(&id) {
-                if let Ok(mut e) = m.write() {
-                    e.on_popup_event(PopupEvent::Closed);
-                }
+    // Notify old module of close without holding the ID lock.
+    if !current_id.is_empty() && current_id != module_id {
+        if let Some(m) = get_module(&current_id) {
+            if let Ok(mut e) = m.write() {
+                e.on_popup_event(PopupEvent::Closed);
             }
         }
+    }
+    if let Ok(mut id) = CURRENT_MODULE_ID.write() {
         *id = module_id.to_string();
     }
     POPUP_VISIBLE.store(true, Ordering::SeqCst);
@@ -743,6 +822,9 @@ fn show_popup_window_appkit(popup_type: PopupType, height: f64) -> bool {
 
     let app = NSApplication::sharedApplication(mtm);
     let windows = app.windows();
+    let stored_number = stored_window_number(popup_type);
+    let mut fallback_index: Option<usize> = None;
+    let mut match_index: Option<usize> = None;
 
     // Find bar window to get screen info
     let mut bar_y = 0.0;
@@ -764,82 +846,111 @@ fn show_popup_window_appkit(popup_type: PopupType, height: f64) -> bool {
     for i in 0..windows.len() {
         let ns_window = windows.objectAtIndex(i);
         let frame = ns_window.frame();
+        let window_number = ns_window.windowNumber() as i64;
 
         // Skip the bar window (height ~32px)
         if frame.size.height <= 40.0 && frame.size.height > 20.0 {
             continue;
         }
 
-        // Match window by type (check width - panel is full-width, popup is narrow)
-        let is_panel = frame.size.width > 500.0;
-        let is_popup = frame.size.width > 200.0 && frame.size.width < 500.0;
-
-        let matches = match popup_type {
-            PopupType::Panel => is_panel,
-            PopupType::Popup => is_popup,
-        };
-
-        if matches {
-            trace_popup(&format!(
-                "show_popup_window_appkit match idx={} frame=({:.1},{:.1}) {:.1}x{:.1}",
-                i, frame.origin.x, frame.origin.y, frame.size.width, frame.size.height
-            ));
-            // Position the window and apply requested height.
-            let new_width = frame.size.width;
-            let current_height = frame.size.height;
-            let desired_height = if clamped_height > 0.0 {
-                clamped_height
-            } else {
-                current_height
-            };
-            let new_y = bar_y - desired_height;
-
-            if popup_type == PopupType::Popup {
-                // Get mouse position as trigger location
-                let (trigger_x, trigger_y, source) = if let Some((x, y)) = take_popup_anchor() {
-                    (x, y, "anchor")
-                } else {
-                    let mouse_pos = NSEvent::mouseLocation();
-                    (mouse_pos.x, mouse_pos.y, "mouse")
-                };
-
-                // Center popup on trigger, with screen edge detection
-                let mut popup_x = trigger_x - (new_width / 2.0);
-
-                let mut clamped = false;
-                // Keep popup on screen
-                if popup_x < 0.0 {
-                    popup_x = 0.0;
-                    clamped = true;
-                } else if popup_x + new_width > screen_width {
-                    popup_x = screen_width - new_width;
-                    clamped = true;
-                }
-
-                trace_popup(&format!(
-                    "show_popup_window_appkit trigger_source={} trigger=({:.1},{:.1}) popup_x={:.1} screen_width={:.1} clamped={}",
-                    source,
-                    trigger_x,
-                    trigger_y,
-                    popup_x,
-                    screen_width,
-                    clamped
-                ));
-
-                // Only reposition, don't change size
-                let new_frame = objc2_foundation::NSRect::new(
-                    objc2_foundation::NSPoint::new(popup_x, new_y),
-                    objc2_foundation::NSSize::new(new_width, desired_height),
-                );
-                ns_window.setFrame_display(new_frame, false);
-                log::info!("Repositioned popup to ({}, {})", popup_x, new_y);
-            } else {
-                let new_frame = objc2_foundation::NSRect::new(
-                    objc2_foundation::NSPoint::new(frame.origin.x, new_y),
-                    objc2_foundation::NSSize::new(new_width, desired_height),
-                );
-                ns_window.setFrame_display(new_frame, false);
+        if stored_number > 0 {
+            if window_number == stored_number {
+                match_index = Some(i);
+                break;
             }
+            if fallback_index.is_none() && width_matches_popup_type(popup_type, frame.size.width) {
+                fallback_index = Some(i);
+            }
+            continue;
+        }
+
+        if width_matches_popup_type(popup_type, frame.size.width) {
+            match_index = Some(i);
+            break;
+        }
+    }
+
+    let selected_index = if match_index.is_none() && stored_number > 0 {
+        fallback_index
+    } else {
+        match_index
+    };
+
+    if let Some(i) = selected_index {
+        let ns_window = windows.objectAtIndex(i);
+        let frame = ns_window.frame();
+        let window_number = ns_window.windowNumber() as i64;
+        if stored_number > 0 && match_index.is_none() && fallback_index.is_some() {
+            log::warn!(
+                "Popup window number mismatch for {:?}; updating stored number to {}",
+                popup_type,
+                window_number
+            );
+        }
+        if stored_number == 0 || (match_index.is_none() && fallback_index.is_some()) {
+            set_window_number(popup_type, window_number);
+        }
+
+        trace_popup(&format!(
+            "show_popup_window_appkit match idx={} frame=({:.1},{:.1}) {:.1}x{:.1}",
+            i, frame.origin.x, frame.origin.y, frame.size.width, frame.size.height
+        ));
+        // Position the window and apply requested height.
+        let new_width = frame.size.width;
+        let current_height = frame.size.height;
+        let desired_height = if clamped_height > 0.0 {
+            clamped_height
+        } else {
+            current_height
+        };
+        let new_y = bar_y - desired_height;
+
+        if popup_type == PopupType::Popup {
+            // Get mouse position as trigger location
+            let (trigger_x, trigger_y, source) = if let Some((x, y)) = take_popup_anchor() {
+                (x, y, "anchor")
+            } else {
+                let mouse_pos = NSEvent::mouseLocation();
+                (mouse_pos.x, mouse_pos.y, "mouse")
+            };
+
+            // Center popup on trigger, with screen edge detection
+            let mut popup_x = trigger_x - (new_width / 2.0);
+
+            let mut clamped = false;
+            // Keep popup on screen
+            if popup_x < 0.0 {
+                popup_x = 0.0;
+                clamped = true;
+            } else if popup_x + new_width > screen_width {
+                popup_x = screen_width - new_width;
+                clamped = true;
+            }
+
+            trace_popup(&format!(
+                "show_popup_window_appkit trigger_source={} trigger=({:.1},{:.1}) popup_x={:.1} screen_width={:.1} clamped={}",
+                source,
+                trigger_x,
+                trigger_y,
+                popup_x,
+                screen_width,
+                clamped
+            ));
+
+            // Only reposition, don't change size
+            let new_frame = objc2_foundation::NSRect::new(
+                objc2_foundation::NSPoint::new(popup_x, new_y),
+                objc2_foundation::NSSize::new(new_width, desired_height),
+            );
+            ns_window.setFrame_display(new_frame, false);
+            log::info!("Repositioned popup to ({}, {})", popup_x, new_y);
+        } else {
+            let new_frame = objc2_foundation::NSRect::new(
+                objc2_foundation::NSPoint::new(frame.origin.x, new_y),
+                objc2_foundation::NSSize::new(new_width, desired_height),
+            );
+            ns_window.setFrame_display(new_frame, false);
+        }
             let post_frame = ns_window.frame();
             log::info!(
                 "show_popup_window_appkit frame_after type={:?} frame=({:.1},{:.1}) {:.1}x{:.1}",
@@ -911,7 +1022,6 @@ fn show_popup_window_appkit(popup_type: PopupType, height: f64) -> bool {
                 show_start.elapsed()
             ));
             return true;
-        }
     }
 
     log::warn!(
@@ -1179,6 +1289,21 @@ mod tests {
             assert_eq!(args[0], (PopupType::Panel, 200.0));
             assert_eq!(args[1], (PopupType::Panel, 320.0));
         });
+    }
+
+    #[test]
+    fn window_match_prefers_registered_number() {
+        let stored = 42;
+        assert!(matches_window_for_test(PopupType::Panel, stored, 42, 100.0));
+        assert!(!matches_window_for_test(PopupType::Panel, stored, 43, 900.0));
+    }
+
+    #[test]
+    fn window_match_falls_back_to_width_when_unregistered() {
+        let stored = 0;
+        assert!(matches_window_for_test(PopupType::Panel, stored, 1, 900.0));
+        assert!(!matches_window_for_test(PopupType::Popup, stored, 1, 900.0));
+        assert!(matches_window_for_test(PopupType::Popup, stored, 1, 320.0));
     }
 }
 

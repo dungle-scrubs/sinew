@@ -205,6 +205,10 @@ fn configure_panel_window(mtm: MainThreadMarker, x: f64, bar_y: f64, width: f64,
                 ns_window.setStyleMask(NSWindowStyleMask::Borderless);
 
                 crate::gpui_app::popup_manager::register_window_observers(&ns_window, "panel");
+                crate::gpui_app::popup_manager::set_window_number(
+                    crate::gpui_app::modules::PopupType::Panel,
+                    ns_window.windowNumber() as i64,
+                );
 
                 let new_frame = NSRect::new(
                     objc2_foundation::NSPoint::new(x, panel_y),
@@ -323,6 +327,10 @@ fn configure_popup_window(mtm: MainThreadMarker, x: f64, bar_y: f64, width: f64,
                 ns_window.setStyleMask(NSWindowStyleMask::Borderless);
 
                 crate::gpui_app::popup_manager::register_window_observers(&ns_window, "popup");
+                crate::gpui_app::popup_manager::set_window_number(
+                    crate::gpui_app::modules::PopupType::Popup,
+                    ns_window.windowNumber() as i64,
+                );
 
                 let new_frame = NSRect::new(
                     objc2_foundation::NSPoint::new(x, popup_y),

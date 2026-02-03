@@ -122,10 +122,6 @@ fn main() {
 
     log::info!("Starting RustyBar v{}", VERSION);
 
-    if std::env::var("RUSTYBAR_TRACE_POPUP").is_ok() {
-        let _ = std::fs::write("/tmp/rustybar_popup_trace.log", "");
-    }
-
     if let Err(err) = start_ipc_listener() {
         log::warn!("Failed to start IPC listener: {}", err);
     }

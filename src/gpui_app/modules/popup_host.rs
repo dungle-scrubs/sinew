@@ -6,13 +6,10 @@
 use std::sync::{Arc, RwLock};
 use std::time::Instant;
 
-use gpui::{
-    div, prelude::*, px, size, AnyElement, Context, ElementId, ParentElement, Styled, Window,
-};
+use gpui::{div, prelude::*, px, AnyElement, Context, ElementId, ParentElement, Styled, Window};
 
 use super::{dispatch_popup_event, get_module, get_popup_spec, GpuiModule, PopupEvent, PopupType};
 use crate::gpui_app::theme::Theme;
-use std::io::Write;
 
 /// View that hosts a module's popup content.
 ///
@@ -26,8 +23,6 @@ pub struct PopupHostView {
     module_id: String,
     /// Cached popup type for this host
     popup_type: PopupType,
-    /// Cached height for resize detection
-    cached_height: f64,
     /// Debug timing for module changes
     last_change_at: Option<Instant>,
 }
@@ -76,23 +71,7 @@ impl PopupHostView {
                             view.last_change_at = Some(Instant::now());
 
                             if needs_resize {
-                                // Force resize on next render.
-                                view.cached_height = 0.0;
-                            }
-                            if std::env::var("RUSTYBAR_TRACE_POPUP").is_ok() {
-                                if let Ok(mut file) = std::fs::OpenOptions::new()
-                                    .create(true)
-                                    .append(true)
-                                    .open("/tmp/rustybar_popup_trace.log")
-                                {
-                                    let _ = writeln!(
-                                        file,
-                                        "{} popup_host module_change type={:?} id='{}'",
-                                        chrono::Utc::now().to_rfc3339(),
-                                        view.popup_type,
-                                        view.module_id
-                                    );
-                                }
+                                // Window resize handled by popup_manager on toggle.
                             }
                             true
                         } else {
@@ -124,7 +103,6 @@ impl PopupHostView {
                 String::new()
             },
             popup_type,
-            cached_height: 0.0,
             last_change_at: None,
         }
     }
@@ -158,23 +136,7 @@ impl Render for PopupHostView {
         };
         if self.module_id != next_id {
             self.module_id = next_id;
-            self.cached_height = 0.0;
             self.last_change_at = Some(Instant::now());
-            if std::env::var("RUSTYBAR_TRACE_POPUP").is_ok() {
-                if let Ok(mut file) = std::fs::OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open("/tmp/rustybar_popup_trace.log")
-                {
-                    let _ = writeln!(
-                        file,
-                        "{} popup_host render_sync type={:?} id='{}'",
-                        chrono::Utc::now().to_rfc3339(),
-                        self.popup_type,
-                        self.module_id
-                    );
-                }
-            }
         }
         // Get the current module
         let module: Option<Arc<RwLock<dyn GpuiModule>>> = if self.module_id.is_empty() {
@@ -184,118 +146,35 @@ impl Render for PopupHostView {
         };
 
         // Get the popup spec to check if this module matches our popup type
-        let spec = module
-            .as_ref()
-            .and_then(|m| m.read().ok().and_then(|e| e.popup_spec()));
-
-        // Resize via GPUI so layout and content stay in sync.
-        if let Some(ref spec) = spec {
-            if spec.popup_type == self.popup_type && (spec.height - self.cached_height).abs() > 1.0
-            {
-                let current_bounds = _window.bounds();
-                let desired_height = px(spec.height as f32);
-                let current_height: f32 = current_bounds.size.height.into();
-                let desired_height_f32: f32 = desired_height.into();
-                log::info!(
-                    "PopupHost[{:?}] height_check id='{}' spec_h={:.1} current_h={:.1}",
-                    self.popup_type,
-                    self.module_id,
-                    spec.height,
-                    current_height
-                );
-
-                if std::env::var("RUSTYBAR_TRACE_POPUP").is_ok() {
-                    if let Ok(mut file) = std::fs::OpenOptions::new()
-                        .create(true)
-                        .append(true)
-                        .open("/tmp/rustybar_popup_trace.log")
-                    {
-                        let _ = writeln!(
-                            file,
-                            "{} popup_host bounds type={:?} id='{}' current_h={:.1} desired_h={:.1}",
-                            chrono::Utc::now().to_rfc3339(),
-                            self.popup_type,
-                            self.module_id,
-                            current_height,
-                            desired_height_f32
-                        );
-                    }
-                }
-
-                if (current_height - desired_height_f32).abs() > 1.0 {
-                    log::info!(
-                        "PopupHost[{:?}] resizing: {} -> {} for '{}'",
-                        self.popup_type,
-                        current_height,
-                        desired_height_f32,
-                        self.module_id
-                    );
-                    _window.resize(size(current_bounds.size.width, desired_height));
-                    crate::gpui_app::popup_manager::reposition_popup_window(
-                        self.popup_type,
-                        spec.height,
-                    );
-                    self.cached_height = spec.height;
-                    if std::env::var("RUSTYBAR_TRACE_POPUP").is_ok() {
-                        if let Ok(mut file) = std::fs::OpenOptions::new()
-                            .create(true)
-                            .append(true)
-                            .open("/tmp/rustybar_popup_trace.log")
-                        {
-                            let _ = writeln!(
-                                file,
-                                "{} popup_host resize type={:?} id='{}' height={}",
-                                chrono::Utc::now().to_rfc3339(),
-                                self.popup_type,
-                                self.module_id,
-                                spec.height
-                            );
-                        }
-                    }
+        let mut spec = None;
+        let mut content = None;
+        if let Some(module) = module.as_ref() {
+            if let Ok(guard) = module.read() {
+                spec = guard.popup_spec();
+                let type_matches = spec
+                    .as_ref()
+                    .map(|s| s.popup_type == self.popup_type)
+                    .unwrap_or(false);
+                if type_matches {
+                    content = guard.render_popup(&self.theme);
                 }
             }
         }
+
+        // Window sizing is handled by popup_manager on toggle; avoid resizing during render.
 
         // Only render content if the module's popup_type matches this host's type
         let type_matches = spec
             .as_ref()
             .map(|s| s.popup_type == self.popup_type)
             .unwrap_or(false);
-
-        let content = if type_matches {
-            module
-                .as_ref()
-                .and_then(|m| m.read().ok().and_then(|e| e.render_popup(&self.theme)))
-        } else {
-            None
-        };
         if type_matches && !self.module_id.is_empty() {
             crate::gpui_app::popup_manager::mark_popup_content_rendered(
                 self.popup_type,
                 &self.module_id,
                 render_start.elapsed(),
             );
-            if std::env::var("RUSTYBAR_TRACE_POPUP").is_ok() {
-                if let Ok(mut file) = std::fs::OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open("/tmp/rustybar_popup_trace.log")
-                {
-                    let window_bounds = _window.bounds();
-                    let since_change = self.last_change_at.map(|t| t.elapsed()).unwrap_or_default();
-                    let _ = writeln!(
-                        file,
-                        "{} popup_host render type={:?} id='{}' took={:?} since_change={:?} win_h={:.1} win_w={:.1}",
-                        chrono::Utc::now().to_rfc3339(),
-                        self.popup_type,
-                        self.module_id,
-                        render_start.elapsed(),
-                        since_change,
-                        f64::from(window_bounds.size.height),
-                        f64::from(window_bounds.size.width)
-                    );
-                }
-            }
+            crate::gpui_app::popup_manager::execute_pending_show();
         }
 
         // Build the container
@@ -304,16 +183,13 @@ impl Render for PopupHostView {
             .id(ElementId::Name(host_id.into()))
             .flex()
             .flex_col()
-            .size_full()
+            .w_full()
             .cursor_default();
 
         // Style based on popup type
         match self.popup_type {
             PopupType::Panel => {
-                container = container
-                    .bg(self.theme.background)
-                    .overflow_y_scroll()
-                    .pb(px(16.0));
+                container = container.bg(self.theme.background).pb(px(16.0));
             }
             PopupType::Popup => {
                 container = container
@@ -322,7 +198,6 @@ impl Render for PopupHostView {
                     .border_l_1()
                     .border_r_1()
                     .border_b_1()
-                    .overflow_y_scroll()
                     .pb(px(16.0));
             }
         }
@@ -346,7 +221,7 @@ impl Render for PopupHostView {
                 };
                 let height_value = clamp_popup_height(spec.height, max_height);
                 let window_bounds = _window.bounds();
-                log::info!(
+                log::debug!(
                     "PopupHost[{:?}] container height id='{}' spec_h={:.1} max_h={:.1} final_h={:.1} win_h={:.1}",
                     self.popup_type,
                     self.module_id,
@@ -356,7 +231,7 @@ impl Render for PopupHostView {
                     f64::from(window_bounds.size.height)
                 );
                 let height = px(height_value as f32);
-                container = container.min_h(height).h(height);
+                container = container.h(height);
             }
         }
 

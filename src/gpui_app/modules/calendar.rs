@@ -6,7 +6,6 @@
 
 use chrono::{Datelike, Duration, FixedOffset, Local, NaiveDate, Timelike, Utc};
 use gpui::{div, prelude::*, px, AnyElement, MouseButton, ParentElement, SharedString, Styled};
-use std::io::Write;
 
 use super::{
     dispatch_popup_action, GpuiModule, PopupAction, PopupAnchor, PopupEvent, PopupSpec, PopupType,
@@ -664,20 +663,6 @@ impl GpuiModule for CalendarModule {
     fn popup_spec(&self) -> Option<PopupSpec> {
         let height = self.calculate_height();
         log::debug!("CalendarModule::popup_spec height={}", height);
-        if std::env::var("RUSTYBAR_TRACE_POPUP").is_ok() {
-            if let Ok(mut file) = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open("/tmp/rustybar_popup_trace.log")
-            {
-                let _ = writeln!(
-                    file,
-                    "{} calendar popup_spec height={}",
-                    chrono::Utc::now().to_rfc3339(),
-                    height
-                );
-            }
-        }
         Some(PopupSpec {
             width: 280.0,
             height,
@@ -738,21 +723,6 @@ impl GpuiModule for CalendarModule {
         match event {
             PopupEvent::Opened => {
                 self.reset();
-                if std::env::var("RUSTYBAR_TRACE_POPUP").is_ok() {
-                    if let Ok(mut file) = std::fs::OpenOptions::new()
-                        .create(true)
-                        .append(true)
-                        .open("/tmp/rustybar_popup_trace.log")
-                    {
-                        let _ = writeln!(
-                            file,
-                            "{} calendar opened reset year={} month={}",
-                            chrono::Utc::now().to_rfc3339(),
-                            self.displayed_year,
-                            self.displayed_month
-                        );
-                    }
-                }
             }
             PopupEvent::Closed => {}
             PopupEvent::Scroll { delta_x, delta_y } => {

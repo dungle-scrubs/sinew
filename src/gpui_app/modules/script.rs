@@ -1,9 +1,10 @@
 //! Script module for running custom commands.
 
-use std::process::Command;
+use std::io::Read;
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use gpui::{div, prelude::*, px, AnyElement, SharedString, Styled};
 
@@ -18,6 +19,7 @@ pub struct ScriptModule {
     icon: Option<String>,
     output: Arc<Mutex<String>>,
     dirty: Arc<AtomicBool>,
+    stop: Arc<AtomicBool>,
 }
 
 impl ScriptModule {
@@ -26,13 +28,18 @@ impl ScriptModule {
         let interval = Duration::from_secs(interval_secs.unwrap_or(60));
         let output = Arc::new(Mutex::new(String::new()));
         let dirty = Arc::new(AtomicBool::new(true));
+        let stop = Arc::new(AtomicBool::new(false));
 
         let command = command.to_string();
         let command_handle = command.clone();
         let output_handle = Arc::clone(&output);
         let dirty_handle = Arc::clone(&dirty);
+        let stop_handle = Arc::clone(&stop);
         std::thread::spawn(move || loop {
-            let next = Self::run_command(&command_handle);
+            if stop_handle.load(Ordering::Relaxed) {
+                break;
+            }
+            let next = Self::run_command_with_timeout(&command_handle, Duration::from_secs(10));
             if let Ok(mut guard) = output_handle.lock() {
                 *guard = next;
             }
@@ -47,20 +54,41 @@ impl ScriptModule {
             icon: icon.map(|s| s.to_string()),
             output,
             dirty,
+            stop,
         }
     }
 
-    fn run_command(command: &str) -> String {
-        let output = Command::new("sh")
+    fn run_command_with_timeout(command: &str, timeout: Duration) -> String {
+        let mut child = match Command::new("sh")
             .args(["-c", command])
-            .output()
-            .ok()
-            .and_then(|o| String::from_utf8(o.stdout).ok());
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+        {
+            Ok(child) => child,
+            Err(_) => return String::new(),
+        };
 
-        if let Some(out) = output {
-            return out.trim().to_string();
+        let start = Instant::now();
+        loop {
+            match child.try_wait() {
+                Ok(Some(_status)) => {
+                    let mut output = String::new();
+                    if let Some(mut stdout) = child.stdout.take() {
+                        let _ = stdout.read_to_string(&mut output);
+                    }
+                    return output.trim().to_string();
+                }
+                Ok(None) => {
+                    if start.elapsed() > timeout {
+                        let _ = child.kill();
+                        return String::new();
+                    }
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                Err(_) => return String::new(),
+            }
         }
-        String::new()
     }
 }
 
@@ -92,5 +120,11 @@ impl GpuiModule for ScriptModule {
 
     fn update(&mut self) -> bool {
         self.dirty.swap(false, Ordering::Relaxed)
+    }
+}
+
+impl Drop for ScriptModule {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
     }
 }

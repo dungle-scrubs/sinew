@@ -18,6 +18,7 @@ pub struct CpuModule {
     fixed_width: bool,
     usage: Arc<AtomicU8>,
     dirty: Arc<AtomicBool>,
+    stop: Arc<AtomicBool>,
 }
 
 impl CpuModule {
@@ -26,12 +27,14 @@ impl CpuModule {
         let initial = Self::fetch_usage();
         let usage = Arc::new(AtomicU8::new(initial));
         let dirty = Arc::new(AtomicBool::new(true));
+        let stop = Arc::new(AtomicBool::new(false));
 
         let usage_handle = Arc::clone(&usage);
         let dirty_handle = Arc::clone(&dirty);
+        let stop_handle = Arc::clone(&stop);
         std::thread::spawn(move || {
             let mut last = usage_handle.load(Ordering::Relaxed);
-            loop {
+            while !stop_handle.load(Ordering::Relaxed) {
                 let next = Self::fetch_usage();
                 if next != last {
                     usage_handle.store(next, Ordering::Relaxed);
@@ -49,6 +52,7 @@ impl CpuModule {
             fixed_width,
             usage,
             dirty,
+            stop,
         }
     }
 
@@ -129,5 +133,11 @@ impl GpuiModule for CpuModule {
     fn value(&self) -> Option<u8> {
         let usage = self.usage.load(Ordering::Relaxed);
         Some(100 - usage) // Invert so low CPU is "good"
+    }
+}
+
+impl Drop for CpuModule {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
     }
 }

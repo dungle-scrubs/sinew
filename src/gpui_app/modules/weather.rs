@@ -38,6 +38,7 @@ pub struct WeatherModule {
     state: Arc<Mutex<LoadingState<WeatherData>>>,
     dirty: Arc<AtomicBool>,
     loading_mode: LoadingMode,
+    stop: Arc<AtomicBool>,
 }
 
 impl WeatherModule {
@@ -45,13 +46,18 @@ impl WeatherModule {
     pub fn new(id: &str, location: &str, update_interval_secs: u64) -> Self {
         let state = Arc::new(Mutex::new(LoadingState::Loading));
         let dirty = Arc::new(AtomicBool::new(true));
+        let stop = Arc::new(AtomicBool::new(false));
 
         let location = location.to_string();
         let location_handle = location.clone();
         let interval = Duration::from_secs(update_interval_secs);
         let state_handle = Arc::clone(&state);
         let dirty_handle = Arc::clone(&dirty);
+        let stop_handle = Arc::clone(&stop);
         std::thread::spawn(move || loop {
+            if stop_handle.load(Ordering::Relaxed) {
+                break;
+            }
             let next = Self::fetch_weather(&location_handle);
             if let Ok(mut guard) = state_handle.lock() {
                 *guard = next;
@@ -67,6 +73,7 @@ impl WeatherModule {
             state,
             dirty,
             loading_mode: LoadingMode::Skeleton,
+            stop,
         };
         module
     }
@@ -184,5 +191,11 @@ impl GpuiModule for WeatherModule {
 
     fn is_loading(&self) -> bool {
         self.state.lock().map(|s| s.is_loading()).unwrap_or(true)
+    }
+}
+
+impl Drop for WeatherModule {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
     }
 }

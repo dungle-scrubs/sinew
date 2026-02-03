@@ -16,6 +16,7 @@ pub struct WindowTitleModule {
     max_length: usize,
     title: Arc<Mutex<String>>,
     dirty: Arc<AtomicBool>,
+    stop: Arc<AtomicBool>,
 }
 
 impl WindowTitleModule {
@@ -23,12 +24,14 @@ impl WindowTitleModule {
     pub fn new(id: &str, max_length: usize) -> Self {
         let title = Arc::new(Mutex::new(String::new()));
         let dirty = Arc::new(AtomicBool::new(true));
+        let stop = Arc::new(AtomicBool::new(false));
 
         let title_handle = Arc::clone(&title);
         let dirty_handle = Arc::clone(&dirty);
+        let stop_handle = Arc::clone(&stop);
         std::thread::spawn(move || {
             let mut last = String::new();
-            loop {
+            while !stop_handle.load(Ordering::Relaxed) {
                 let next = Self::fetch_status(max_length);
                 if next != last {
                     if let Ok(mut guard) = title_handle.lock() {
@@ -46,6 +49,7 @@ impl WindowTitleModule {
             max_length,
             title,
             dirty,
+            stop,
         }
     }
 
@@ -81,5 +85,11 @@ impl GpuiModule for WindowTitleModule {
 
     fn update(&mut self) -> bool {
         self.dirty.swap(false, Ordering::Relaxed)
+    }
+}
+
+impl Drop for WindowTitleModule {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
     }
 }

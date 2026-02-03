@@ -1,7 +1,8 @@
 //! API usage/costs module for LLM providers.
 
 use gpui::{div, prelude::*, px, AnyElement, SharedString, Styled, TextAlign};
-use std::process::Command;
+use std::io::Read;
+use std::process::{Command, Stdio};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, RwLock,
@@ -26,6 +27,7 @@ pub struct ApiUsageModule {
     loading: Arc<AtomicBool>,
     update_interval: Duration,
     last_update: Instant,
+    stop: Arc<AtomicBool>,
 }
 
 impl ApiUsageModule {
@@ -40,6 +42,7 @@ impl ApiUsageModule {
         let rows = Arc::new(RwLock::new(Vec::new()));
         let dirty = Arc::new(AtomicBool::new(true));
         let loading = Arc::new(AtomicBool::new(true));
+        let stop = Arc::new(AtomicBool::new(false));
         let mut module = Self {
             id: id.to_string(),
             theme: None,
@@ -48,6 +51,7 @@ impl ApiUsageModule {
             loading,
             update_interval: Duration::from_secs(1800),
             last_update: Instant::now() - Duration::from_secs(1801),
+            stop,
         };
         module.spawn_updater();
         module
@@ -57,6 +61,7 @@ impl ApiUsageModule {
         let rows = Arc::new(RwLock::new(Vec::new()));
         let dirty = Arc::new(AtomicBool::new(true));
         let loading = Arc::new(AtomicBool::new(true));
+        let stop = Arc::new(AtomicBool::new(false));
         let mut module = Self {
             id: "api_usage".to_string(),
             theme: Some(theme),
@@ -65,6 +70,7 @@ impl ApiUsageModule {
             loading,
             update_interval: Duration::from_secs(1800),
             last_update: Instant::now() - Duration::from_secs(1801),
+            stop,
         };
         module.spawn_updater();
         module
@@ -75,8 +81,12 @@ impl ApiUsageModule {
         let dirty = self.dirty.clone();
         let loading = self.loading.clone();
         let interval = self.update_interval;
+        let stop = self.stop.clone();
 
         std::thread::spawn(move || loop {
+            if stop.load(Ordering::Relaxed) {
+                break;
+            }
             let data = fetch_api_usage_rows();
             if let Ok(mut guard) = rows.write() {
                 *guard = data;
@@ -98,20 +108,42 @@ impl ApiUsageModule {
     }
 }
 
-fn run_shell(script: &str) -> String {
-    Command::new("sh")
+fn run_shell_with_timeout(script: &str, timeout: Duration) -> String {
+    let mut child = match Command::new("sh")
         .arg("-c")
         .arg(script)
-        .output()
-        .ok()
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .unwrap_or_default()
-        .trim()
-        .to_string()
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(_) => return String::new(),
+    };
+
+    let start = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(_status)) => {
+                let mut output = String::new();
+                if let Some(mut stdout) = child.stdout.take() {
+                    let _ = stdout.read_to_string(&mut output);
+                }
+                return output.trim().to_string();
+            }
+            Ok(None) => {
+                if start.elapsed() > timeout {
+                    let _ = child.kill();
+                    return String::new();
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            Err(_) => return String::new(),
+        }
+    }
 }
 
 fn fetch_api_usage_rows() -> Vec<ApiUsageRow> {
-    let anthropic = run_shell(
+    let anthropic = run_shell_with_timeout(
         r#"
 export OP_SERVICE_ACCOUNT_TOKEN=$(security find-generic-password -a dev-secrets -s OP_SERVICE_ACCOUNT_TOKEN -w 2>/dev/null)
 if [ -z "$OP_SERVICE_ACCOUNT_TOKEN" ]; then echo "0"; exit 0; fi
@@ -124,10 +156,11 @@ curl -s "https://api.anthropic.com/v1/organizations/cost_report?starting_at=$STA
   -H "Content-Type: application/json" 2>/dev/null \
 | jq '[.data[].amount] | add // 0'
 "#,
+        Duration::from_secs(10),
     );
     let anthropic_cost = anthropic.parse::<f64>().unwrap_or(0.0);
 
-    let openai = run_shell(
+    let openai = run_shell_with_timeout(
         r#"
 export OP_SERVICE_ACCOUNT_TOKEN=$(security find-generic-password -a dev-secrets -s OP_SERVICE_ACCOUNT_TOKEN -w 2>/dev/null)
 if [ -z "$OP_SERVICE_ACCOUNT_TOKEN" ]; then echo "0"; exit 0; fi
@@ -140,10 +173,11 @@ curl -s "https://api.openai.com/v1/organization/costs?start_time=$START&end_time
   -H "Content-Type: application/json" 2>/dev/null \
 | jq '[.data[].results[].amount.value] | add // 0'
 "#,
+        Duration::from_secs(10),
     );
     let openai_cost = openai.parse::<f64>().unwrap_or(0.0);
 
-    let openrouter = run_shell(
+    let openrouter = run_shell_with_timeout(
         r#"
 export OP_SERVICE_ACCOUNT_TOKEN=$(security find-generic-password -a dev-secrets -s OP_SERVICE_ACCOUNT_TOKEN -w 2>/dev/null)
 if [ -z "$OP_SERVICE_ACCOUNT_TOKEN" ]; then echo "0"; exit 0; fi
@@ -153,15 +187,17 @@ curl -s "https://openrouter.ai/api/v1/credits" \
   -H "Authorization: Bearer $KEY" 2>/dev/null \
 | jq '(.data.total_credits - .data.total_usage) // 0'
 "#,
+        Duration::from_secs(10),
     );
     let openrouter_bal = openrouter.parse::<f64>().unwrap_or(0.0);
 
-    let codex = run_shell(
+    let codex = run_shell_with_timeout(
         r#"
 LATEST=$(find ~/.codex/sessions -name "rollout-*.jsonl" -type f 2>/dev/null | sort -r | head -1)
 if [ -z "$LATEST" ]; then echo "0"; exit 0; fi
 grep '"token_count"' "$LATEST" 2>/dev/null | tail -1 | jq -r '.payload.rate_limits.primary.used_percent // 0'
 "#,
+        Duration::from_secs(10),
     );
     let codex_pct = codex.parse::<f64>().unwrap_or(0.0);
 
@@ -325,5 +361,11 @@ impl super::GpuiModule for ApiUsageModule {
         }
 
         Some(container.into_any_element())
+    }
+}
+
+impl Drop for ApiUsageModule {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
     }
 }

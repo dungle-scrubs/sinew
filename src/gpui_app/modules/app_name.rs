@@ -16,6 +16,7 @@ pub struct AppNameModule {
     max_length: usize,
     name: Arc<Mutex<String>>,
     dirty: Arc<AtomicBool>,
+    stop: Arc<AtomicBool>,
 }
 
 impl AppNameModule {
@@ -24,12 +25,14 @@ impl AppNameModule {
         let initial = Self::fetch_name(max_length);
         let name = Arc::new(Mutex::new(initial));
         let dirty = Arc::new(AtomicBool::new(true));
+        let stop = Arc::new(AtomicBool::new(false));
 
         let name_handle = Arc::clone(&name);
         let dirty_handle = Arc::clone(&dirty);
+        let stop_handle = Arc::clone(&stop);
         std::thread::spawn(move || {
             let mut last = String::new();
-            loop {
+            while !stop_handle.load(Ordering::Relaxed) {
                 let next = Self::fetch_name(max_length);
                 if next != last {
                     if let Ok(mut guard) = name_handle.lock() {
@@ -47,6 +50,7 @@ impl AppNameModule {
             max_length,
             name,
             dirty,
+            stop,
         }
     }
 
@@ -88,5 +92,11 @@ impl GpuiModule for AppNameModule {
 
     fn update(&mut self) -> bool {
         self.dirty.swap(false, Ordering::Relaxed)
+    }
+}
+
+impl Drop for AppNameModule {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
     }
 }

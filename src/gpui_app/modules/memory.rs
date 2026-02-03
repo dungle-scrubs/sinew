@@ -18,6 +18,7 @@ pub struct MemoryModule {
     fixed_width: bool,
     usage: Arc<AtomicU8>,
     dirty: Arc<AtomicBool>,
+    stop: Arc<AtomicBool>,
 }
 
 impl MemoryModule {
@@ -25,12 +26,14 @@ impl MemoryModule {
     pub fn new(id: &str, label: Option<&str>, label_align: LabelAlign, fixed_width: bool) -> Self {
         let usage = Arc::new(AtomicU8::new(0));
         let dirty = Arc::new(AtomicBool::new(true));
+        let stop = Arc::new(AtomicBool::new(false));
 
         let usage_handle = Arc::clone(&usage);
         let dirty_handle = Arc::clone(&dirty);
+        let stop_handle = Arc::clone(&stop);
         std::thread::spawn(move || {
             let mut last = 0;
-            loop {
+            while !stop_handle.load(Ordering::Relaxed) {
                 let next = Self::fetch_status();
                 if next != last {
                     usage_handle.store(next, Ordering::Relaxed);
@@ -48,6 +51,7 @@ impl MemoryModule {
             fixed_width,
             usage,
             dirty,
+            stop,
         };
         module
     }
@@ -125,5 +129,11 @@ impl GpuiModule for MemoryModule {
 
     fn value(&self) -> Option<u8> {
         Some(100 - self.usage.load(Ordering::Relaxed)) // Invert so low memory usage is "good"
+    }
+}
+
+impl Drop for MemoryModule {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
     }
 }

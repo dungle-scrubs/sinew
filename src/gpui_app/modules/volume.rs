@@ -17,6 +17,7 @@ pub struct VolumeModule {
     level: Arc<AtomicU8>,
     muted: Arc<AtomicBool>,
     dirty: Arc<AtomicBool>,
+    stop: Arc<AtomicBool>,
 }
 
 impl VolumeModule {
@@ -26,14 +27,16 @@ impl VolumeModule {
         let level = Arc::new(AtomicU8::new(initial_level));
         let muted = Arc::new(AtomicBool::new(initial_muted));
         let dirty = Arc::new(AtomicBool::new(true));
+        let stop = Arc::new(AtomicBool::new(false));
 
         let level_handle = Arc::clone(&level);
         let muted_handle = Arc::clone(&muted);
         let dirty_handle = Arc::clone(&dirty);
+        let stop_handle = Arc::clone(&stop);
         std::thread::spawn(move || {
             let mut last_level = level_handle.load(Ordering::Relaxed);
             let mut last_muted = muted_handle.load(Ordering::Relaxed);
-            loop {
+            while !stop_handle.load(Ordering::Relaxed) {
                 let (next_level, next_muted) = Self::fetch_status();
                 if next_level != last_level || next_muted != last_muted {
                     level_handle.store(next_level, Ordering::Relaxed);
@@ -51,6 +54,7 @@ impl VolumeModule {
             level,
             muted,
             dirty,
+            stop,
         }
     }
 
@@ -117,5 +121,11 @@ impl GpuiModule for VolumeModule {
 
     fn value(&self) -> Option<u8> {
         Some(self.level.load(Ordering::Relaxed))
+    }
+}
+
+impl Drop for VolumeModule {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
     }
 }

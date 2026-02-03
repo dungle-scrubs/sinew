@@ -18,6 +18,7 @@ pub struct NowPlayingModule {
     text: Arc<Mutex<String>>,
     is_playing: Arc<AtomicBool>,
     dirty: Arc<AtomicBool>,
+    stop: Arc<AtomicBool>,
 }
 
 impl NowPlayingModule {
@@ -26,14 +27,16 @@ impl NowPlayingModule {
         let text = Arc::new(Mutex::new(String::new()));
         let is_playing = Arc::new(AtomicBool::new(false));
         let dirty = Arc::new(AtomicBool::new(true));
+        let stop = Arc::new(AtomicBool::new(false));
 
         let text_handle = Arc::clone(&text);
         let playing_handle = Arc::clone(&is_playing);
         let dirty_handle = Arc::clone(&dirty);
+        let stop_handle = Arc::clone(&stop);
         std::thread::spawn(move || {
             let mut last_text = String::new();
             let mut last_playing = false;
-            loop {
+            while !stop_handle.load(Ordering::Relaxed) {
                 let (next_text, next_playing) = Self::fetch_status(max_length);
                 if next_text != last_text || next_playing != last_playing {
                     if let Ok(mut guard) = text_handle.lock() {
@@ -54,6 +57,7 @@ impl NowPlayingModule {
             text,
             is_playing,
             dirty,
+            stop,
         }
     }
 
@@ -100,5 +104,11 @@ impl GpuiModule for NowPlayingModule {
 
     fn update(&mut self) -> bool {
         self.dirty.swap(false, Ordering::Relaxed)
+    }
+}
+
+impl Drop for NowPlayingModule {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
     }
 }

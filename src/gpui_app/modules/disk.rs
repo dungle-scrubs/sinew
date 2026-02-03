@@ -20,6 +20,7 @@ pub struct DiskModule {
     usage: Arc<Mutex<String>>,
     usage_percent: Arc<AtomicU8>,
     dirty: Arc<AtomicBool>,
+    stop: Arc<AtomicBool>,
 }
 
 impl DiskModule {
@@ -34,16 +35,18 @@ impl DiskModule {
         let usage = Arc::new(Mutex::new("0%".to_string()));
         let usage_percent = Arc::new(AtomicU8::new(0));
         let dirty = Arc::new(AtomicBool::new(true));
+        let stop = Arc::new(AtomicBool::new(false));
 
         let usage_handle = Arc::clone(&usage);
         let percent_handle = Arc::clone(&usage_percent);
         let dirty_handle = Arc::clone(&dirty);
+        let stop_handle = Arc::clone(&stop);
         let path = path.to_string();
         let path_handle = path.clone();
         std::thread::spawn(move || {
             let mut last_usage = String::new();
             let mut last_percent = 0;
-            loop {
+            while !stop_handle.load(Ordering::Relaxed) {
                 let (next_usage, next_percent) = Self::fetch_status(&path_handle);
                 if next_usage != last_usage || next_percent != last_percent {
                     if let Ok(mut guard) = usage_handle.lock() {
@@ -67,6 +70,7 @@ impl DiskModule {
             usage,
             usage_percent,
             dirty,
+            stop,
         };
         module
     }
@@ -153,5 +157,11 @@ impl GpuiModule for DiskModule {
 
     fn value(&self) -> Option<u8> {
         Some(100 - self.usage_percent.load(Ordering::Relaxed)) // Invert so low disk usage is "good"
+    }
+}
+
+impl Drop for DiskModule {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
     }
 }

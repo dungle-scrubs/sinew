@@ -18,6 +18,7 @@ pub struct BatteryModule {
     level: Arc<AtomicU8>,
     charging: Arc<AtomicBool>,
     dirty: Arc<AtomicBool>,
+    stop: Arc<AtomicBool>,
 }
 
 impl BatteryModule {
@@ -26,14 +27,16 @@ impl BatteryModule {
         let level = Arc::new(AtomicU8::new(0));
         let charging = Arc::new(AtomicBool::new(false));
         let dirty = Arc::new(AtomicBool::new(true));
+        let stop = Arc::new(AtomicBool::new(false));
 
         let level_handle = Arc::clone(&level);
         let charging_handle = Arc::clone(&charging);
         let dirty_handle = Arc::clone(&dirty);
+        let stop_handle = Arc::clone(&stop);
         std::thread::spawn(move || {
             let mut last_level = 0;
             let mut last_charging = false;
-            loop {
+            while !stop_handle.load(Ordering::Relaxed) {
                 let (next_level, next_charging) = Self::fetch_status();
                 if next_level != last_level || next_charging != last_charging {
                     level_handle.store(next_level, Ordering::Relaxed);
@@ -52,6 +55,7 @@ impl BatteryModule {
             level,
             charging,
             dirty,
+            stop,
         };
         module
     }
@@ -147,5 +151,11 @@ impl GpuiModule for BatteryModule {
 
     fn value(&self) -> Option<u8> {
         Some(self.level.load(Ordering::Relaxed))
+    }
+}
+
+impl Drop for BatteryModule {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
     }
 }

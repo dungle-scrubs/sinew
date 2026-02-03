@@ -16,6 +16,7 @@ pub struct WifiModule {
     id: String,
     ssid: Arc<Mutex<Option<String>>>,
     dirty: Arc<AtomicBool>,
+    stop: Arc<AtomicBool>,
 }
 
 impl WifiModule {
@@ -23,12 +24,14 @@ impl WifiModule {
     pub fn new(id: &str) -> Self {
         let ssid = Arc::new(Mutex::new(None));
         let dirty = Arc::new(AtomicBool::new(true));
+        let stop = Arc::new(AtomicBool::new(false));
 
         let ssid_handle = Arc::clone(&ssid);
         let dirty_handle = Arc::clone(&dirty);
+        let stop_handle = Arc::clone(&stop);
         std::thread::spawn(move || {
             let mut last: Option<String> = None;
-            loop {
+            while !stop_handle.load(Ordering::Relaxed) {
                 let next = Self::fetch_status();
                 if next != last {
                     if let Ok(mut guard) = ssid_handle.lock() {
@@ -45,6 +48,7 @@ impl WifiModule {
             id: id.to_string(),
             ssid,
             dirty,
+            stop,
         }
     }
 
@@ -95,5 +99,11 @@ impl GpuiModule for WifiModule {
 
     fn update(&mut self) -> bool {
         self.dirty.swap(false, Ordering::Relaxed)
+    }
+}
+
+impl Drop for WifiModule {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
     }
 }

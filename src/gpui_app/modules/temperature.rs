@@ -25,6 +25,7 @@ pub struct TemperatureModule {
     fixed_width: bool,
     temp_celsius: Arc<AtomicU8>,
     dirty: Arc<AtomicBool>,
+    stop: Arc<AtomicBool>,
 }
 
 impl TemperatureModule {
@@ -39,12 +40,14 @@ impl TemperatureModule {
         let initial = Self::fetch_temperature();
         let temp_celsius = Arc::new(AtomicU8::new(initial));
         let dirty = Arc::new(AtomicBool::new(true));
+        let stop = Arc::new(AtomicBool::new(false));
 
         let temp_handle = Arc::clone(&temp_celsius);
         let dirty_handle = Arc::clone(&dirty);
+        let stop_handle = Arc::clone(&stop);
         std::thread::spawn(move || {
             let mut last = temp_handle.load(Ordering::Relaxed);
-            loop {
+            while !stop_handle.load(Ordering::Relaxed) {
                 let next = Self::fetch_temperature();
                 if next != last {
                     temp_handle.store(next, Ordering::Relaxed);
@@ -63,6 +66,7 @@ impl TemperatureModule {
             fixed_width,
             temp_celsius,
             dirty,
+            stop,
         }
     }
 
@@ -201,5 +205,11 @@ impl GpuiModule for TemperatureModule {
         }
         let normalized = ((100.0 - temp as f32) / 70.0 * 100.0).clamp(0.0, 100.0);
         Some(normalized as u8)
+    }
+}
+
+impl Drop for TemperatureModule {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
     }
 }

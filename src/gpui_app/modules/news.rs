@@ -4,8 +4,8 @@
 //! - Bar item: News icon with count badge
 //! - Popup: Full-width panel showing release notes from configured sources
 
-use std::io::Write;
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
@@ -63,6 +63,7 @@ pub struct NewsModule {
     last_update: Instant,
     data: Arc<RwLock<Option<ReleasesData>>>,
     is_loading: bool,
+    in_flight: Arc<AtomicBool>,
 }
 
 impl NewsModule {
@@ -75,6 +76,7 @@ impl NewsModule {
             last_update: Instant::now() - Duration::from_secs(3601),
             data: Arc::new(RwLock::new(None)),
             is_loading: true,
+            in_flight: Arc::new(AtomicBool::new(false)),
         };
         module.fetch_releases();
         module
@@ -89,6 +91,7 @@ impl NewsModule {
             last_update: Instant::now() - Duration::from_secs(3601),
             data: Arc::new(RwLock::new(None)),
             is_loading: true,
+            in_flight: Arc::new(AtomicBool::new(false)),
         };
         module.fetch_releases();
         module
@@ -181,8 +184,13 @@ impl NewsModule {
 
     /// Fetches releases from all sources.
     fn fetch_releases(&mut self) {
+        if self.in_flight.swap(true, Ordering::SeqCst) {
+            log::debug!("NewsModule::fetch_releases already in flight");
+            return;
+        }
         self.is_loading = true;
         let data = Arc::clone(&self.data);
+        let in_flight = Arc::clone(&self.in_flight);
         log::info!("NewsModule::fetch_releases start");
 
         std::thread::spawn(move || {
@@ -217,6 +225,7 @@ impl NewsModule {
             if let Ok(mut guard) = data.write() {
                 *guard = Some(releases_data);
             }
+            in_flight.store(false, Ordering::SeqCst);
             log::info!(
                 "NewsModule::fetch_releases done: sources={}, total_items={}, took {:?}",
                 sources_len,
@@ -732,22 +741,6 @@ impl GpuiModule for NewsModule {
             );
 
         if let Some(data) = news_data {
-            if std::env::var("RUSTYBAR_TRACE_POPUP").is_ok() {
-                if let Ok(mut file) = std::fs::OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open("/tmp/rustybar_popup_trace.log")
-                {
-                    let panel_width = crate::gpui_app::popup_manager::panel_width();
-                    let _ = writeln!(
-                        file,
-                        "{} news layout panel_width={:.1} sources={}",
-                        chrono::Utc::now().to_rfc3339(),
-                        panel_width,
-                        data.sources.len()
-                    );
-                }
-            }
             let mut iter = data.sources.into_iter();
             let first_row = iter.by_ref().take(3).collect::<Vec<_>>();
             let second_row = iter.by_ref().take(1).collect::<Vec<_>>();
@@ -768,21 +761,6 @@ impl GpuiModule for NewsModule {
                 let panel_width = crate::gpui_app::popup_manager::panel_width();
                 let row_width = panel_width - 32.0;
                 let column_width = ((row_width - (12.0 * 2.0)) / 3.0).max(180.0);
-                if std::env::var("RUSTYBAR_TRACE_POPUP").is_ok() {
-                    if let Ok(mut file) = std::fs::OpenOptions::new()
-                        .create(true)
-                        .append(true)
-                        .open("/tmp/rustybar_popup_trace.log")
-                    {
-                        let _ = writeln!(
-                            file,
-                            "{} news layout row_width={:.1} column_width={:.1}",
-                            chrono::Utc::now().to_rfc3339(),
-                            row_width,
-                            column_width
-                        );
-                    }
-                }
                 let (source, releases) = second_row[0].clone();
                 let single = self.render_source_column(
                     theme,

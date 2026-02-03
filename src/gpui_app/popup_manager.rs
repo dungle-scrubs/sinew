@@ -16,8 +16,8 @@ use objc2_foundation::{NSNotification, NSNotificationCenter, NSNotificationName,
 use std::cell::RefCell;
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 use std::sync::atomic::{AtomicI64, Ordering as AtomicIOrdering};
+use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 use std::sync::OnceLock;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
@@ -141,7 +141,12 @@ fn width_matches_popup_type(popup_type: PopupType, width: f64) -> bool {
 }
 
 #[cfg(test)]
-fn matches_window_for_test(popup_type: PopupType, stored: i64, window_number: i64, width: f64) -> bool {
+fn matches_window_for_test(
+    popup_type: PopupType,
+    stored: i64,
+    window_number: i64,
+    width: f64,
+) -> bool {
     if stored > 0 {
         return stored == window_number;
     }
@@ -951,77 +956,77 @@ fn show_popup_window_appkit(popup_type: PopupType, height: f64) -> bool {
             );
             ns_window.setFrame_display(new_frame, false);
         }
-            let post_frame = ns_window.frame();
-            log::info!(
-                "show_popup_window_appkit frame_after type={:?} frame=({:.1},{:.1}) {:.1}x{:.1}",
-                popup_type,
-                post_frame.origin.x,
-                post_frame.origin.y,
-                post_frame.size.width,
-                post_frame.size.height
-            );
-            trace_popup(&format!(
-                "show_popup_window_appkit frame_after type={:?} frame=({:.1},{:.1}) {:.1}x{:.1}",
-                popup_type,
-                post_frame.origin.x,
-                post_frame.origin.y,
-                post_frame.size.width,
-                post_frame.size.height
-            ));
+        let post_frame = ns_window.frame();
+        log::info!(
+            "show_popup_window_appkit frame_after type={:?} frame=({:.1},{:.1}) {:.1}x{:.1}",
+            popup_type,
+            post_frame.origin.x,
+            post_frame.origin.y,
+            post_frame.size.width,
+            post_frame.size.height
+        );
+        trace_popup(&format!(
+            "show_popup_window_appkit frame_after type={:?} frame=({:.1},{:.1}) {:.1}x{:.1}",
+            popup_type,
+            post_frame.origin.x,
+            post_frame.origin.y,
+            post_frame.size.width,
+            post_frame.size.height
+        ));
 
-            // Show window at floating level with proper background
-            unsafe {
-                let _: () = objc2::msg_send![&ns_window, setLevel: 3_i64];
-            }
-            ns_window.setAlphaValue(1.0);
-            ns_window.setOpaque(true);
-            ns_window.setIgnoresMouseEvents(false);
+        // Show window at floating level with proper background
+        unsafe {
+            let _: () = objc2::msg_send![&ns_window, setLevel: 3_i64];
+        }
+        ns_window.setAlphaValue(1.0);
+        ns_window.setOpaque(true);
+        ns_window.setIgnoresMouseEvents(false);
 
-            // Disable AppKit window animations to reduce first-open latency.
-            use objc2_app_kit::NSWindowAnimationBehavior;
-            ns_window.setAnimationBehavior(NSWindowAnimationBehavior::None);
+        // Disable AppKit window animations to reduce first-open latency.
+        use objc2_app_kit::NSWindowAnimationBehavior;
+        ns_window.setAnimationBehavior(NSWindowAnimationBehavior::None);
 
-            // Set background color to match theme (dark background)
-            use objc2_app_kit::NSColor;
-            let bg_color = NSColor::colorWithSRGBRed_green_blue_alpha(
-                30.0 / 255.0,
-                30.0 / 255.0,
-                46.0 / 255.0,
-                1.0,
-            );
-            ns_window.setBackgroundColor(Some(&bg_color));
+        // Set background color to match theme (dark background)
+        use objc2_app_kit::NSColor;
+        let bg_color = NSColor::colorWithSRGBRed_green_blue_alpha(
+            30.0 / 255.0,
+            30.0 / 255.0,
+            46.0 / 255.0,
+            1.0,
+        );
+        ns_window.setBackgroundColor(Some(&bg_color));
 
-            ns_window.setAcceptsMouseMovedEvents(true);
-            // Order front without activating the window.
-            ns_window.orderFrontRegardless();
-            trace_popup(&format!(
-                "show_popup_window_appkit visible={} alpha={:.2} key={} ignores_mouse={}",
-                ns_window.isVisible(),
-                ns_window.alphaValue(),
-                ns_window.isKeyWindow(),
-                ns_window.ignoresMouseEvents()
-            ));
-            trace_popup(&format!(
-                "show_popup_window_appkit occlusion={:?}",
-                ns_window.occlusionState()
-            ));
-            log_popup_window_state_later(popup_type, "after_show_150ms");
-            mark_popup_window_shown(popup_type);
+        ns_window.setAcceptsMouseMovedEvents(true);
+        // Order front without activating the window.
+        ns_window.orderFrontRegardless();
+        trace_popup(&format!(
+            "show_popup_window_appkit visible={} alpha={:.2} key={} ignores_mouse={}",
+            ns_window.isVisible(),
+            ns_window.alphaValue(),
+            ns_window.isKeyWindow(),
+            ns_window.ignoresMouseEvents()
+        ));
+        trace_popup(&format!(
+            "show_popup_window_appkit occlusion={:?}",
+            ns_window.occlusionState()
+        ));
+        log_popup_window_state_later(popup_type, "after_show_150ms");
+        mark_popup_window_shown(popup_type);
 
-            // Start monitors
-            start_global_click_monitor(mtm);
+        // Start monitors
+        start_global_click_monitor(mtm);
 
-            log::info!(
-                "Popup window shown: type={:?}, width={}",
-                popup_type,
-                new_width
-            );
-            trace_popup(&format!(
-                "show_popup_window_appkit shown type={:?} took={:?}",
-                popup_type,
-                show_start.elapsed()
-            ));
-            return true;
+        log::info!(
+            "Popup window shown: type={:?}, width={}",
+            popup_type,
+            new_width
+        );
+        trace_popup(&format!(
+            "show_popup_window_appkit shown type={:?} took={:?}",
+            popup_type,
+            show_start.elapsed()
+        ));
+        return true;
     }
 
     log::warn!(
@@ -1295,7 +1300,12 @@ mod tests {
     fn window_match_prefers_registered_number() {
         let stored = 42;
         assert!(matches_window_for_test(PopupType::Panel, stored, 42, 100.0));
-        assert!(!matches_window_for_test(PopupType::Panel, stored, 43, 900.0));
+        assert!(!matches_window_for_test(
+            PopupType::Panel,
+            stored,
+            43,
+            900.0
+        ));
     }
 
     #[test]

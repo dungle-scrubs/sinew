@@ -14,6 +14,7 @@ mod date;
 mod datetime;
 mod demo;
 mod disk;
+mod hisohiso;
 mod memory;
 pub mod news;
 mod now_playing;
@@ -38,6 +39,7 @@ pub use date::DateModule;
 pub use datetime::DateTimeModule;
 pub use demo::DemoModule;
 pub use disk::DiskModule;
+pub use hisohiso::HisohisoModule;
 pub use memory::MemoryModule;
 pub use news::NewsModule;
 pub use now_playing::NowPlayingModule;
@@ -54,6 +56,7 @@ pub use window_title::WindowTitleModule;
 
 use gpui::AnyElement;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 
 use crate::config::{parse_hex_color, ModuleConfig};
@@ -180,6 +183,12 @@ pub trait GpuiModule: Send + Sync {
 
     /// Handles popup UI actions.
     fn on_popup_action(&mut self, _action: PopupAction) {}
+
+    /// Called when the module is registered into the global registry.
+    fn on_module_start(&mut self) {}
+
+    /// Called before the module is removed/replaced in the registry.
+    fn on_module_stop(&mut self) {}
 }
 
 /// Module styling options.
@@ -408,6 +417,7 @@ pub fn create_module(config: &ModuleConfig, index: usize) -> Option<PositionedMo
             Some(Box::new(SeparatorModule::new(&id, sep_type, width)))
         }
         "demo" => Some(Box::new(DemoModule::new(&id))),
+        "hisohiso" => Some(Box::new(HisohisoModule::new(&id))),
         "skeleton" => Some(Box::new(SkeletonDemoModule::new(&id))),
         unknown => {
             log::warn!("Unknown module type: {}", unknown);
@@ -530,6 +540,11 @@ impl Default for ModuleRegistry {
 
 /// Global module registry for popup-capable modules.
 static MODULE_REGISTRY: RwLock<Option<ModuleRegistry>> = RwLock::new(None);
+static MODULE_GENERATION: AtomicU64 = AtomicU64::new(0);
+
+pub fn module_generation() -> u64 {
+    MODULE_GENERATION.load(Ordering::Relaxed)
+}
 
 #[cfg(test)]
 pub fn set_module_registry_for_test(registry: ModuleRegistry) {
@@ -540,12 +555,14 @@ pub fn set_module_registry_for_test(registry: ModuleRegistry) {
 
 /// Initializes the global module registry with popup-capable modules.
 pub fn init_modules(theme: &Theme) {
+    MODULE_GENERATION.fetch_add(1, Ordering::Relaxed);
     let mut registry = ModuleRegistry::new();
 
     // Register popup-capable modules
     registry.register(CalendarModule::new(theme.clone()));
     registry.register(NewsModule::new_popup(theme.clone()));
-    registry.register(DemoModule::new_popup(theme.clone()));
+    // DemoModule kept available, but not registered by default.
+    // registry.register(DemoModule::new_popup(theme.clone()));
     registry.register(ApiUsageModule::new_popup(theme.clone()));
 
     // Log registered modules
@@ -553,6 +570,18 @@ pub fn init_modules(theme: &Theme) {
     log::info!("Module registry: registering {:?}", registered);
 
     if let Ok(mut global) = MODULE_REGISTRY.write() {
+        if let Some(prev) = global.take() {
+            for module in prev.modules.values() {
+                if let Ok(mut guard) = module.write() {
+                    guard.on_module_stop();
+                }
+            }
+        }
+        for module in registry.modules.values() {
+            if let Ok(mut guard) = module.write() {
+                guard.on_module_start();
+            }
+        }
         *global = Some(registry);
     }
     log::info!("Module registry initialized");

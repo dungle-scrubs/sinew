@@ -8,7 +8,7 @@ class Rustybar < Formula
   depends_on :macos
 
   def install
-    system "cargo", "build", "--release", "--locked"
+    system "cargo", "build", "--release"
     bin.install "target/release/rustybar"
     bin.install "target/release/rustybar-msg" if File.exist?("target/release/rustybar-msg")
   end

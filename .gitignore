@@ -22,7 +22,9 @@ Cargo.lock
 
 # AI coding assistants
 .claude/
+.tallow/
 CLAUDE.md
+AGENTS.md
 AGENT.md
 plan.md
 *-plan.md

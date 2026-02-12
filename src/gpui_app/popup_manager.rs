@@ -764,10 +764,7 @@ pub fn warmup_popups() {
     let popup_height = get_popup_spec("calendar")
         .map(|s| s.height)
         .unwrap_or(520.0);
-    let panel_height = get_popup_spec("news")
-        .or_else(|| get_popup_spec("demo"))
-        .map(|s| s.height)
-        .unwrap_or(280.0);
+    let panel_height = get_popup_spec("demo").map(|s| s.height).unwrap_or(280.0);
 
     trace_popup(&format!(
         "warmup_popups start popup_h={} panel_h={}",

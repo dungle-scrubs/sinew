@@ -20,28 +20,17 @@ const DEFAULT_MODULE_TYPES: &[&str] = &[
     "app_name",
     "window_title",
     "now_playing",
-    "news",
-    "api_usage",
     "script",
     "weather",
     "separator",
     "skeleton",
-    "hisohiso",
 ];
 
 /// Known separator types
 const KNOWN_SEPARATOR_TYPES: &[&str] = &["space", "line", "dot", "icon"];
 
 /// Known popup types
-const KNOWN_POPUP_TYPES: &[&str] = &[
-    "calendar",
-    "demo",
-    "info",
-    "news",
-    "api_usage",
-    "script",
-    "panel",
-];
+const KNOWN_POPUP_TYPES: &[&str] = &["calendar", "demo", "info", "script", "panel"];
 
 /// Known popup anchor positions
 const KNOWN_POPUP_ANCHORS: &[&str] = &["left", "center", "right"];

@@ -4,7 +4,6 @@
 //! Each module implements the GpuiModule trait to render its content.
 //! Modules may optionally provide popup content.
 
-mod api_usage;
 mod app_name;
 mod battery;
 pub mod calendar;
@@ -14,9 +13,7 @@ mod date;
 mod datetime;
 mod demo;
 mod disk;
-mod hisohiso;
 mod memory;
-pub mod news;
 mod now_playing;
 mod popup_host;
 mod script;
@@ -29,7 +26,6 @@ mod weather;
 mod wifi;
 mod window_title;
 
-pub use api_usage::ApiUsageModule;
 pub use app_name::AppNameModule;
 pub use battery::BatteryModule;
 pub use calendar::CalendarModule;
@@ -39,9 +35,7 @@ pub use date::DateModule;
 pub use datetime::DateTimeModule;
 pub use demo::DemoModule;
 pub use disk::DiskModule;
-pub use hisohiso::HisohisoModule;
 pub use memory::MemoryModule;
-pub use news::NewsModule;
 pub use now_playing::NowPlayingModule;
 pub use popup_host::PopupHostView;
 pub use script::ScriptModule;
@@ -175,10 +169,6 @@ fn ensure_builtin_factories() {
             let max_len = config.max_length.map(|v| v as usize).unwrap_or(40);
             Some(Box::new(NowPlayingModule::new(id, max_len)))
         });
-        register_module_factory("news", |id, _config| Some(Box::new(NewsModule::new(id))));
-        register_module_factory("api_usage", |id, _config| {
-            Some(Box::new(ApiUsageModule::new(id)))
-        });
         register_module_factory("script", |id, config| {
             let command = config.command.as_deref().unwrap_or("echo 'no command'");
             let interval = config.interval.map(|v| v as u64);
@@ -203,9 +193,6 @@ fn ensure_builtin_factories() {
         register_module_factory("demo", |id, _config| Some(Box::new(DemoModule::new(id))));
         register_module_factory("skeleton", |id, _config| {
             Some(Box::new(SkeletonDemoModule::new(id)))
-        });
-        register_module_factory("hisohiso", |id, _config| {
-            Some(Box::new(HisohisoModule::new(id)))
         });
     });
 }
@@ -644,10 +631,8 @@ pub fn init_modules(theme: &Theme) {
 
     // Register popup-capable modules
     registry.register(CalendarModule::new(theme.clone()));
-    registry.register(NewsModule::new_popup(theme.clone()));
     // DemoModule kept available, but not registered by default.
     // registry.register(DemoModule::new_popup(theme.clone()));
-    registry.register(ApiUsageModule::new_popup(theme.clone()));
 
     // Log registered modules
     let registered: Vec<&str> = registry.modules.keys().map(|s| s.as_str()).collect();

@@ -2,7 +2,7 @@ class Rustybar < Formula
   desc "macOS menu bar replacement with notch-aware layouts and hot-reload config"
   homepage "https://github.com/dungle-scrubs/rustybar"
   url "https://github.com/dungle-scrubs/rustybar/archive/refs/tags/v0.1.0.tar.gz"
-  sha256 "PLACEHOLDER"
+  sha256 "fba62efbf14f57455aad2aaad9d5cdf7ecb1f758bae663239da11cb1a369f461"
   license "MIT"
 
   depends_on :macos

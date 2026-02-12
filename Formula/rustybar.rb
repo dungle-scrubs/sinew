@@ -6,6 +6,7 @@ class Rustybar < Formula
   license "MIT"
 
   depends_on :macos
+  depends_on "rust" => :build
 
   def install
     system "cargo", "build", "--release"

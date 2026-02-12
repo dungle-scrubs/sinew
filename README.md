@@ -121,14 +121,20 @@ See [config.example.toml](config.example.toml) for all options.
 |------|-------------|
 | `clock` | Time display with custom format |
 | `date` | Date display with optional calendar popup |
+| `datetime` | Combined date and time |
 | `battery` | Battery percentage with threshold colors |
-| `volume` | System volume level |
-| `cpu` | CPU usage percentage |
+| `cpu` | CPU usage percentage (Mach API) |
 | `memory` | Memory usage |
+| `disk` | Disk usage for a given path |
+| `temperature` | CPU temperature via smctemp |
+| `volume` | System volume level |
+| `wifi` | WiFi connection status |
+| `app_name` | Active application name (NSWorkspace) |
+| `window_title` | Active window title |
+| `now_playing` | Currently playing media |
 | `weather` | Weather from wttr.in |
-| `app_name` | Active application name |
-| `static` | Static text with optional icon |
 | `script` | Custom script output |
+| `static` | Static text with optional icon |
 | `separator` | Space, line, dot, or icon separator |
 
 ## Known Limitations

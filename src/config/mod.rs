@@ -71,8 +71,8 @@ pub fn load_config() -> Config {
     }
 
     if !errors.is_empty() {
-        log::error!("Config has errors; refusing to start with invalid configuration.");
-        std::process::exit(1);
+        log::error!("Config has errors; falling back to defaults.");
+        return Config::default();
     }
 
     config
@@ -90,7 +90,7 @@ pub struct ConfigWatcher {
     _watcher: RecommendedWatcher,
     receiver: Receiver<Result<Event, notify::Error>>,
     config: SharedConfig,
-    last_reload: std::cell::Cell<std::time::Instant>,
+    last_reload: Mutex<std::time::Instant>,
 }
 
 impl ConfigWatcher {
@@ -116,7 +116,7 @@ impl ConfigWatcher {
             _watcher: watcher,
             receiver: rx,
             config,
-            last_reload: std::cell::Cell::new(std::time::Instant::now()),
+            last_reload: Mutex::new(std::time::Instant::now()),
         })
     }
 
@@ -148,12 +148,19 @@ impl ConfigWatcher {
         // Debounce: only reload if 500ms have passed since last reload
         if should_reload {
             let now = std::time::Instant::now();
-            if now.duration_since(self.last_reload.get()) > Duration::from_millis(500) {
+            let elapsed = self
+                .last_reload
+                .lock()
+                .map(|t| now.duration_since(*t))
+                .unwrap_or(Duration::ZERO);
+            if elapsed > Duration::from_millis(500) {
                 log::info!("Config file changed, reloading...");
                 let new_config = load_config();
                 if let Ok(mut cfg) = self.config.write() {
                     *cfg = new_config;
-                    self.last_reload.set(now);
+                    if let Ok(mut t) = self.last_reload.lock() {
+                        *t = now;
+                    }
                     return true;
                 }
             }

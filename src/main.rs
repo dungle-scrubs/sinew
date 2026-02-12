@@ -1,5 +1,3 @@
-// Allow dead code for API methods/structs meant for future use
-#![allow(dead_code)]
 // Allow complex types in internal code
 #![allow(clippy::type_complexity)]
 // Allow functions with many arguments for now
@@ -14,6 +12,40 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 fn socket_path() -> std::path::PathBuf {
     let runtime_dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".to_string());
     std::path::PathBuf::from(runtime_dir).join("rustybar.sock")
+}
+
+/// Removes the Unix socket file on process exit.
+fn install_socket_cleanup() {
+    let socket = socket_path();
+    // Register cleanup for SIGINT/SIGTERM
+    let socket_clone = socket.clone();
+    if let Err(e) = ctrlc::set_handler(move || {
+        let _ = std::fs::remove_file(&socket_clone);
+        std::process::exit(0);
+    }) {
+        log::warn!("Failed to install signal handler: {}", e);
+    }
+}
+
+/// Handles an IPC command and returns the response string.
+fn handle_ipc_command(command: &str) -> String {
+    let parts: Vec<&str> = command.trim().splitn(2, ' ').collect();
+    match parts.first().copied().unwrap_or("") {
+        "reload" | "redraw" => {
+            gpui_app::request_immediate_refresh();
+            "OK: refresh requested".to_string()
+        }
+        "status" => {
+            let status = serde_json::json!({
+                "version": VERSION,
+                "running": true,
+            });
+            status.to_string()
+        }
+        other => {
+            format!("ERR: unknown command '{}'", other)
+        }
+    }
 }
 
 fn start_ipc_listener() -> std::io::Result<()> {
@@ -43,8 +75,9 @@ fn start_ipc_listener() -> std::io::Result<()> {
             let mut reader = BufReader::new(stream);
             let mut line = String::new();
             let _ = reader.read_line(&mut line);
+            let response = handle_ipc_command(&line);
             if let Ok(mut stream) = reader.into_inner().try_clone() {
-                let _ = writeln!(stream, "OK");
+                let _ = writeln!(stream, "{}", response);
             }
         }
     });
@@ -125,6 +158,7 @@ fn main() {
     if let Err(err) = start_ipc_listener() {
         log::warn!("Failed to start IPC listener: {}", err);
     }
+    install_socket_cleanup();
 
     // Run the GPUI-based application
     gpui_app::run();

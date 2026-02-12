@@ -84,9 +84,19 @@ impl TemperatureModule {
     }
 
     fn try_smctemp() -> Option<u8> {
-        // smctemp -l lists all sensor keys with values
-        // TCMb is the main CPU temperature on Apple Silicon
-        let output = Command::new("smctemp")
+        // smctemp -l lists all sensor keys with values.
+        // TCMb is the main CPU temperature on Apple Silicon.
+        // Try common Homebrew paths since launchd has a minimal PATH.
+        let binary = [
+            "/opt/homebrew/bin/smctemp",
+            "/usr/local/bin/smctemp",
+            "smctemp",
+        ]
+        .iter()
+        .find(|p| std::path::Path::new(p).exists())
+        .copied()
+        .unwrap_or("smctemp");
+        let output = Command::new(binary)
             .arg("-l")
             .output()
             .ok()
@@ -111,7 +121,16 @@ impl TemperatureModule {
     }
 
     fn try_osx_cpu_temp() -> Option<u8> {
-        let output = Command::new("osx-cpu-temp")
+        let binary = [
+            "/opt/homebrew/bin/osx-cpu-temp",
+            "/usr/local/bin/osx-cpu-temp",
+            "osx-cpu-temp",
+        ]
+        .iter()
+        .find(|p| std::path::Path::new(p).exists())
+        .copied()
+        .unwrap_or("osx-cpu-temp");
+        let output = Command::new(binary)
             .output()
             .ok()
             .and_then(|o| String::from_utf8(o.stdout).ok())?;

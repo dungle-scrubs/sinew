@@ -971,9 +971,10 @@ fn show_popup_window_appkit(popup_type: PopupType, height: f64) -> bool {
             post_frame.size.height
         ));
 
-        // Show window at floating level with proper background
+        // Show window just above bar level (-20) but below normal windows (0).
+        // This keeps popups visible over the bar without floating above other apps.
         unsafe {
-            let _: () = objc2::msg_send![&ns_window, setLevel: 3_i64];
+            let _: () = objc2::msg_send![&ns_window, setLevel: -19_i64];
         }
         ns_window.setAlphaValue(1.0);
         ns_window.setOpaque(true);
@@ -983,15 +984,8 @@ fn show_popup_window_appkit(popup_type: PopupType, height: f64) -> bool {
         use objc2_app_kit::NSWindowAnimationBehavior;
         ns_window.setAnimationBehavior(NSWindowAnimationBehavior::None);
 
-        // Set background color to match theme (dark background)
-        use objc2_app_kit::NSColor;
-        let bg_color = NSColor::colorWithSRGBRed_green_blue_alpha(
-            30.0 / 255.0,
-            30.0 / 255.0,
-            46.0 / 255.0,
-            1.0,
-        );
-        ns_window.setBackgroundColor(Some(&bg_color));
+        // Background color is set by GPUI via the PopupHostView theme.
+        // Don't override it here — that would ignore the user's config.
 
         ns_window.setAcceptsMouseMovedEvents(true);
         // Order front without activating the window.

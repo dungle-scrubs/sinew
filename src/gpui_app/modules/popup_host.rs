@@ -6,7 +6,7 @@
 use std::sync::{Arc, RwLock};
 use std::time::Instant;
 
-use gpui::{div, prelude::*, px, AnyElement, Context, ElementId, ParentElement, Styled, Window};
+use gpui::{div, prelude::*, px, Context, ElementId, ParentElement, Styled, Window};
 
 use super::{dispatch_popup_event, get_module, get_popup_spec, GpuiModule, PopupEvent, PopupType};
 use crate::gpui_app::theme::Theme;

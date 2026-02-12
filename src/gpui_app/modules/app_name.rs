@@ -1,6 +1,5 @@
-//! App name module for displaying the frontmost application.
+//! App name module using NSWorkspace (no osascript polling).
 
-use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -11,6 +10,7 @@ use super::{truncate_text, GpuiModule};
 use crate::gpui_app::theme::Theme;
 
 /// App name module that displays the current frontmost application.
+/// Uses NSRunningApplication API directly instead of spawning osascript.
 pub struct AppNameModule {
     id: String,
     max_length: usize,
@@ -27,6 +27,9 @@ impl AppNameModule {
         let dirty = Arc::new(AtomicBool::new(true));
         let stop = Arc::new(AtomicBool::new(false));
 
+        // Poll at a relaxed interval as a fallback. The primary update
+        // path is the workspace notification (APP_CHANGED flag) checked
+        // by BarView's refresh task, which triggers re-render and update().
         let name_handle = Arc::clone(&name);
         let dirty_handle = Arc::clone(&dirty);
         let stop_handle = Arc::clone(&stop);
@@ -41,7 +44,7 @@ impl AppNameModule {
                     dirty_handle.store(true, Ordering::Relaxed);
                     last = next;
                 }
-                std::thread::sleep(Duration::from_secs(1));
+                std::thread::sleep(Duration::from_secs(5));
             }
         });
 
@@ -54,23 +57,27 @@ impl AppNameModule {
         }
     }
 
+    /// Gets the frontmost app name via NSWorkspace (no process spawn).
     fn fetch_name(max_length: usize) -> String {
-        // Get the display name from the application bundle (e.g., "WezTerm" instead of "wezterm-gui")
-        let output = Command::new("osascript")
-            .args([
-                "-e",
-                "tell application \"Finder\" to get name of (path to frontmost application)",
-            ])
-            .output()
-            .ok()
-            .and_then(|o| String::from_utf8(o.stdout).ok());
+        use objc2_app_kit::NSWorkspace;
+        use objc2_foundation::MainThreadMarker;
 
-        if let Some(name) = output {
-            // Remove .app suffix if present
-            let name = name.trim().strip_suffix(".app").unwrap_or(name.trim());
-            return truncate_text(name, max_length);
-        }
-        String::new()
+        // NSWorkspace requires main thread marker in newer objc2 versions,
+        // but sharedWorkspace is safe to call from any thread in practice.
+        // Fall back gracefully if we can't get it.
+        let workspace = if MainThreadMarker::new().is_some() {
+            NSWorkspace::sharedWorkspace()
+        } else {
+            return String::new();
+        };
+
+        let name = workspace
+            .frontmostApplication()
+            .and_then(|app| app.localizedName())
+            .map(|n| n.to_string())
+            .unwrap_or_default();
+
+        truncate_text(&name, max_length)
     }
 }
 

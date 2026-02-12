@@ -8,8 +8,10 @@ mod bar;
 pub mod camera;
 pub mod modules;
 pub mod popup_manager;
+#[allow(dead_code)]
 pub mod primitives;
 pub mod scheduler;
+#[allow(dead_code)]
 pub mod theme;
 
 use gpui::{
@@ -18,6 +20,7 @@ use gpui::{
 use objc2::MainThreadMarker;
 use std::sync::{Mutex, OnceLock};
 
+pub use bar::request_immediate_refresh;
 pub use bar::BarView;
 
 use crate::config::load_config;
@@ -347,14 +350,7 @@ fn configure_popup_window(mtm: MainThreadMarker, x: f64, bar_y: f64, width: f64,
 
                 ns_window.setHasShadow(false); // No shadow - popup extends from bar
                 ns_window.setOpaque(true);
-                use objc2_app_kit::NSColor;
-                let bg_color = NSColor::colorWithSRGBRed_green_blue_alpha(
-                    30.0 / 255.0,
-                    30.0 / 255.0,
-                    46.0 / 255.0,
-                    1.0,
-                );
-                ns_window.setBackgroundColor(Some(&bg_color));
+                // Background color is set by GPUI via the PopupHostView theme.
                 ns_window.setIgnoresMouseEvents(false);
 
                 log::info!(

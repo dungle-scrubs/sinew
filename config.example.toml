@@ -1,37 +1,141 @@
 # RustyBar Configuration
-# Copy this file to ~/.config/rustybar/config.toml
+# Copy to ~/.config/rustybar/config.toml
 
+# ─── Bar ──────────────────────────────────────────────────────────────
 [bar]
-# Height in pixels, or "auto" to match system menu bar
-height = "auto"
-
-# Background color (hex format: #RRGGBB or #RRGGBBAA)
-background_color = "#1e1e2e"
-
-# Text color
+height = "auto"                    # "auto" or pixels (e.g. 32)
+background_color = "#1e1e2e"       # Hex: #RRGGBB or #RRGGBBAA
 text_color = "#cdd6f4"
-
-# Font settings
 font_family = "SF Pro"
 font_size = 13.0
+padding = 4.0
+border_color = "#45475a"
+border_width = 1.0
+border_radius = 6.0
+camera_indicator = true            # Red bar when camera is active
+# hover_effects = true             # Lighten module bg on hover
+# popup_background_color = "#181825"
+# popup_text_color = "#cdd6f4"
 
-[clock]
-# Time format (uses chrono strftime format)
-# %a = weekday abbrev, %b = month abbrev, %d = day, %H = hour, %M = minute, %S = second
-format = "%a %b %d  %H:%M:%S"
+# ─── Theme (semantic colors) ─────────────────────────────────────────
+# [bar.theme]
+# accent = "#89b4fa"
+# success = "#a6e3a1"
+# warning = "#f9e2af"
+# destructive = "#f38ba8"
+# muted = "#6c7086"
+# muted_foreground = "#9399b2"
+# card = "#313244"
+# card_foreground = "#cdd6f4"
+# border = "#45475a"
 
-# Position: "left", "center", or "right"
-position = "right"
+# ─── Left side, far left ─────────────────────────────────────────────
+[[modules.left.left]]
+type = "app_name"
+max_length = 30
+background = "#313244"
+padding = 8.0
+corner_radius = 6.0
 
-# Example weather module configuration:
-# [[modules.left.left]]
-# type = "weather"
-# location = "auto"           # or "New York", "London", etc.
-# update_interval = 600       # seconds (10 min default)
-# show_while_loading = true   # true = show "Loading...", false = hidden until loaded
+# ─── Left side, near center (toward notch) ───────────────────────────
+[[modules.left.right]]
+type = "cpu"
+label = "CPU"
+label_align = "right"
+background = "#313244"
+color = "#89b4fa"
+padding = 6.0
+corner_radius = 6.0
 
-# Demo module - showcases all visual components
-# Click to open a full-width panel with component examples
-# [[modules.right.right]]
-# type = "demo"
-# popup = "demo"              # Opens the component demo panel
+[[modules.left.right]]
+type = "memory"
+label = "RAM"
+label_align = "right"
+background = "#313244"
+color = "#a6e3a1"
+padding = 6.0
+corner_radius = 6.0
+
+[[modules.left.right]]
+type = "disk"
+label = "DISK"
+label_align = "right"
+path = "/"
+background = "#313244"
+color = "#f9e2af"
+padding = 6.0
+corner_radius = 6.0
+
+# ─── Right side, near center (toward notch) ──────────────────────────
+# [[modules.right.left]]
+# type = "now_playing"
+# max_length = 40
+
+# ─── Right side, far right ───────────────────────────────────────────
+[[modules.right.right]]
+type = "weather"
+location = "auto"                  # or "New York", "London", etc.
+update_interval = 600              # seconds
+color = "#89b4fa"
+
+[[modules.right.right]]
+type = "separator"
+separator_type = "space"
+separator_width = 6.0
+
+[[modules.right.right]]
+type = "volume"
+background = "#313244"
+padding = 6.0
+corner_radius = 6.0
+click_command = "open 'x-apple.systempreferences:com.apple.Sound-Settings.extension'"
+
+[[modules.right.right]]
+type = "separator"
+separator_type = "space"
+separator_width = 6.0
+
+[[modules.right.right]]
+type = "battery"
+color = "#a6e3a1"
+warning_color = "#f9e2af"
+warning_threshold = 30
+critical_color = "#f38ba8"
+critical_threshold = 15
+
+[[modules.right.right]]
+type = "separator"
+separator_type = "space"
+separator_width = 6.0
+
+[[modules.right.right]]
+type = "datetime"
+date_format = "%a %b %d"
+time_format = "%H:%M"
+background = "#313244"
+padding = 8.0
+corner_radius = 6.0
+popup = "calendar"
+popup_max_height = 90
+
+# ─── Module reference ────────────────────────────────────────────────
+# type          | description
+# --------------|--------------------------------------------------
+# clock         | Time display (format = "%H:%M:%S")
+# date          | Date display (format = "%a %b %d")
+# datetime      | Combined date + time (date_format, time_format)
+# battery       | Battery % with threshold colors
+# cpu           | CPU usage % (Mach API, no process spawn)
+# memory        | RAM usage %
+# disk          | Disk usage % (path = "/")
+# temperature   | CPU temp via smctemp (temp_unit = "c" or "f")
+# volume        | System volume level
+# wifi          | WiFi status
+# app_name      | Frontmost application name
+# window_title  | Active window title
+# now_playing   | Currently playing media
+# weather       | Weather from wttr.in (location, update_interval)
+# script        | Custom command output (command, interval)
+# static        | Static text/icon (text, icon)
+# separator     | Visual spacer (separator_type, separator_width)
+# demo          | Component showcase (popup = "demo")

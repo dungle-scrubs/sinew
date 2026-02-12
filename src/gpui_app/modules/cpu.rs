@@ -1,6 +1,5 @@
-//! CPU module for displaying CPU usage.
+//! CPU module for displaying CPU usage via Mach host_statistics.
 
-use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -9,6 +8,60 @@ use gpui::{div, prelude::*, px, AnyElement, SharedString, Styled};
 
 use super::{GpuiModule, LabelAlign};
 use crate::gpui_app::theme::Theme;
+
+/// Mach host_statistics FFI for CPU ticks (no process spawn needed).
+mod mach_cpu {
+    use std::ffi::c_uint;
+    use std::mem::MaybeUninit;
+
+    const HOST_CPU_LOAD_INFO: c_uint = 3;
+    const CPU_STATE_USER: usize = 0;
+    const CPU_STATE_SYSTEM: usize = 1;
+    const CPU_STATE_IDLE: usize = 2;
+    const CPU_STATE_NICE: usize = 3;
+    const CPU_STATE_MAX: usize = 4;
+
+    #[repr(C)]
+    struct HostCpuLoadInfo {
+        cpu_ticks: [u32; CPU_STATE_MAX],
+    }
+
+    extern "C" {
+        fn mach_host_self() -> c_uint;
+        fn host_statistics(
+            host: c_uint,
+            flavor: c_uint,
+            info: *mut HostCpuLoadInfo,
+            count: *mut c_uint,
+        ) -> c_uint;
+    }
+
+    /// Returns cumulative (active_ticks, total_ticks).
+    pub fn cpu_ticks() -> Option<(u64, u64)> {
+        unsafe {
+            let mut info = MaybeUninit::<HostCpuLoadInfo>::uninit();
+            let mut count =
+                (std::mem::size_of::<HostCpuLoadInfo>() / std::mem::size_of::<u32>()) as c_uint;
+            let status = host_statistics(
+                mach_host_self(),
+                HOST_CPU_LOAD_INFO,
+                info.as_mut_ptr(),
+                &mut count,
+            );
+            if status != 0 {
+                return None;
+            }
+            let info = info.assume_init();
+            let user = info.cpu_ticks[CPU_STATE_USER] as u64;
+            let system = info.cpu_ticks[CPU_STATE_SYSTEM] as u64;
+            let idle = info.cpu_ticks[CPU_STATE_IDLE] as u64;
+            let nice = info.cpu_ticks[CPU_STATE_NICE] as u64;
+            let total = user + system + idle + nice;
+            let active = user + system + nice;
+            Some((active, total))
+        }
+    }
+}
 
 /// CPU module that displays CPU usage percentage.
 pub struct CpuModule {
@@ -24,8 +77,7 @@ pub struct CpuModule {
 impl CpuModule {
     /// Creates a new CPU module.
     pub fn new(id: &str, label: Option<&str>, label_align: LabelAlign, fixed_width: bool) -> Self {
-        let initial = Self::fetch_usage();
-        let usage = Arc::new(AtomicU8::new(initial));
+        let usage = Arc::new(AtomicU8::new(0));
         let dirty = Arc::new(AtomicBool::new(true));
         let stop = Arc::new(AtomicBool::new(false));
 
@@ -33,15 +85,27 @@ impl CpuModule {
         let dirty_handle = Arc::clone(&dirty);
         let stop_handle = Arc::clone(&stop);
         std::thread::spawn(move || {
-            let mut last = usage_handle.load(Ordering::Relaxed);
+            let mut prev_ticks: Option<(u64, u64)> = None;
+            let mut last = 0u8;
             while !stop_handle.load(Ordering::Relaxed) {
-                let next = Self::fetch_usage();
-                if next != last {
-                    usage_handle.store(next, Ordering::Relaxed);
-                    dirty_handle.store(true, Ordering::Relaxed);
-                    last = next;
+                if let Some(current) = mach_cpu::cpu_ticks() {
+                    if let Some(prev) = prev_ticks {
+                        let d_active = current.0.saturating_sub(prev.0);
+                        let d_total = current.1.saturating_sub(prev.1);
+                        let pct = if d_total > 0 {
+                            ((d_active as f64 / d_total as f64) * 100.0).round() as u8
+                        } else {
+                            0
+                        };
+                        if pct != last {
+                            usage_handle.store(pct, Ordering::Relaxed);
+                            dirty_handle.store(true, Ordering::Relaxed);
+                            last = pct;
+                        }
+                    }
+                    prev_ticks = Some(current);
                 }
-                std::thread::sleep(Duration::from_secs(1));
+                std::thread::sleep(Duration::from_secs(2));
             }
         });
 
@@ -54,22 +118,6 @@ impl CpuModule {
             dirty,
             stop,
         }
-    }
-
-    fn fetch_usage() -> u8 {
-        let output = Command::new("sh")
-            .args([
-                "-c",
-                "top -l 1 -n 0 | grep 'CPU usage' | awk '{print $3}' | tr -d '%'",
-            ])
-            .output()
-            .ok()
-            .and_then(|o| String::from_utf8(o.stdout).ok());
-
-        output
-            .and_then(|s| s.trim().parse::<f32>().ok())
-            .map(|v| v.round() as u8)
-            .unwrap_or(0)
     }
 }
 

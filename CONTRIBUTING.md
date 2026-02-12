@@ -43,12 +43,24 @@ Thank you for considering contributing to RustyBar!
 - Follow Rust naming conventions
 - Add comments for non-obvious logic
 
+## Commit Messages
+
+This project uses [Conventional Commits](https://www.conventionalcommits.org/) for automated changelog generation:
+
+| Prefix | Purpose | Example |
+|--------|---------|---------|
+| `feat:` | New feature | `feat: add volume module` |
+| `fix:` | Bug fix | `fix: resolve crash on empty config` |
+| `docs:` | Documentation | `docs: update README` |
+| `refactor:` | Code restructuring | `refactor: extract popup logic` |
+| `chore:` | Maintenance | `chore: update dependencies` |
+
 ## Adding a New Module
 
-1. Create a new file in `src/modules/`
-2. Implement the `Module` trait
-3. Register in `src/modules/mod.rs`
-4. Add to `create_module_from_config()` factory
+1. Create a new file in `src/gpui_app/modules/`
+2. Implement the `GpuiModule` trait
+3. Register the factory in `src/gpui_app/modules/mod.rs`
+4. Add the type to `KNOWN_MODULE_TYPES` in `src/config/types.rs`
 5. Document configuration options
 
 ## Pull Request Guidelines

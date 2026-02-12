@@ -13,7 +13,15 @@ class Rustybar < Formula
     bin.install "target/release/rustybar-msg" if File.exist?("target/release/rustybar-msg")
   end
 
+  service do
+    run [opt_bin/"rustybar"]
+    keep_alive true
+    log_path var/"log/rustybar.log"
+    error_log_path var/"log/rustybar.err"
+    environment_variables RUST_LOG: "info"
+  end
+
   test do
-    assert_match "rustybar", shell_output("#{bin}/rustybar --help 2>&1", 1)
+    assert_match version.to_s, shell_output("#{bin}/rustybar --version")
   end
 end

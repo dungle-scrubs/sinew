@@ -1,5 +1,6 @@
 [package]
 name = "rustybar"
+# x-release-please-version
 version = "0.1.0"
 edition = "2021"
 description = "A macOS menu bar replacement with notch-aware split layouts and hot-reload configuration"

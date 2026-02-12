@@ -11,7 +11,6 @@ A macOS menu bar replacement built in Rust. Features notch-aware split layouts, 
 - **Four-zone module placement** - Left outer, left inner, right inner, right outer
 - **Hot-reload configuration** - Edit config and see changes instantly
 - **Built-in modules** - Clock, date, battery, volume, CPU, memory, weather, app name, and more
-- **Hisohiso waveform** - Optional dictation waveform module via local IPC
 - **Popups and panels** - Calendar popups, script-driven content panels
 - **Toggle groups** - Radio-button style module groups with active state styling
 - **Autohide support** - Slides down when macOS menu bar appears
@@ -27,6 +26,12 @@ A macOS menu bar replacement built in Rust. Features notch-aware split layouts, 
 
 ```bash
 brew install dungle-scrubs/rustybar/rustybar
+```
+
+### Run at Login
+
+```bash
+brew services start rustybar
 ```
 
 ### Building from Source
@@ -119,7 +124,6 @@ See [config.example.toml](config.example.toml) for all options.
 | `battery` | Battery percentage with threshold colors |
 | `volume` | System volume level |
 | `cpu` | CPU usage percentage |
-| `hisohiso` | Hisohiso dictation waveform via local IPC |
 | `memory` | Memory usage |
 | `weather` | Weather from wttr.in |
 | `app_name` | Active application name |

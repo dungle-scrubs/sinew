@@ -11,6 +11,13 @@
 # macOS
 .DS_Store
 
+# Node
+node_modules/
+
+# Docs build
+docs/dist/
+docs/.astro/
+
 # Logs
 *.log
 

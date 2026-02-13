@@ -1,0 +1,35 @@
+---
+title: Sinew
+description: A macOS menu bar replacement built in Rust.
+template: splash
+hero:
+  tagline: A macOS menu bar replacement built in Rust. Notch-aware layouts, modular widgets, hot-reload config.
+  image:
+    file: ../../assets/logo.jpg
+  actions:
+    - text: Get Started
+      link: /getting-started/installation/
+      icon: right-arrow
+      variant: primary
+    - text: View on GitHub
+      link: https://github.com/dungle-scrubs/sinew
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+<CardGrid stagger>
+  <Card title="Notch-aware layout" icon="laptop">
+    Automatically splits around the MacBook notch, or use a fake notch on external displays.
+  </Card>
+  <Card title="Four-zone modules" icon="bars">
+    Place modules in left outer, left inner, right inner, or right outer positions.
+  </Card>
+  <Card title="Hot-reload config" icon="setting">
+    Edit `~/.config/sinew/config.toml` and see changes instantly — no restart needed.
+  </Card>
+  <Card title="Built on GPUI" icon="rocket">
+    GPU-accelerated rendering via Zed's GPUI framework. Smooth, fast, native.
+  </Card>
+</CardGrid>

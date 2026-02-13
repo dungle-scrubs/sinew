@@ -1,0 +1,24 @@
+{
+  "name": "sinew-docs",
+  "type": "module",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "check": "biome check docs/",
+    "check:fix": "biome check --write docs/"
+  },
+  "dependencies": {
+    "@astrojs/starlight": "latest",
+    "astro": "latest",
+    "sharp": "latest"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "latest"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["sharp", "esbuild"]
+  }
+}

@@ -1,0 +1,116 @@
+/*
+ * Sinew docs — blueprint aesthetic.
+ * Tinted neutrals toward the logo's indigo hue.
+ * Monospace headings for technical identity, humanist body for readability.
+ */
+
+@import url("https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,350..700;1,350..700&family=JetBrains+Mono:wght@400;500;600;700&display=swap");
+
+/* --- Light mode (blueprint on paper) --- */
+:root {
+	--sl-font: "DM Sans", system-ui, sans-serif;
+	--sl-font-system-mono: "JetBrains Mono", ui-monospace, monospace;
+
+	/* Indigo-tinted neutrals — not dead grays */
+	--sl-color-gray-1: oklch(95% 0.012 255);
+	--sl-color-gray-2: oklch(88% 0.015 255);
+	--sl-color-gray-3: oklch(72% 0.02 255);
+	--sl-color-gray-4: oklch(48% 0.025 255);
+	--sl-color-gray-5: oklch(30% 0.02 255);
+	--sl-color-gray-6: oklch(18% 0.015 255);
+	--sl-color-gray-7: oklch(10% 0.01 255);
+
+	/* Blueprint accent */
+	--sl-color-accent-low: oklch(92% 0.04 255);
+	--sl-color-accent: oklch(52% 0.14 255);
+	--sl-color-accent-high: oklch(28% 0.08 255);
+
+	--sl-color-text: var(--sl-color-gray-6);
+	--sl-color-text-accent: oklch(42% 0.12 255);
+}
+
+/* --- Dark mode (blueprint on indigo) --- */
+:root[data-theme="dark"] {
+	--sl-color-gray-1: oklch(18% 0.015 255);
+	--sl-color-gray-2: oklch(22% 0.018 255);
+	--sl-color-gray-3: oklch(34% 0.02 255);
+	--sl-color-gray-4: oklch(55% 0.02 255);
+	--sl-color-gray-5: oklch(72% 0.015 255);
+	--sl-color-gray-6: oklch(88% 0.01 255);
+	--sl-color-gray-7: oklch(95% 0.008 255);
+
+	--sl-color-accent-low: oklch(22% 0.06 255);
+	--sl-color-accent: oklch(68% 0.12 255);
+	--sl-color-accent-high: oklch(90% 0.05 255);
+
+	--sl-color-bg-nav: oklch(14% 0.018 255);
+	--sl-color-bg-sidebar: oklch(14% 0.018 255);
+	--sl-color-text: var(--sl-color-gray-6);
+	--sl-color-text-accent: oklch(72% 0.1 255);
+
+	/* Reduce body font weight for dark bg readability */
+	--sl-font-weight-regular: 350;
+}
+
+/* --- Headings: monospace for technical identity --- */
+:is(h1, h2, h3, h4, h5, h6) {
+	font-family: var(--sl-font-system-mono);
+	letter-spacing: -0.02em;
+}
+
+/* --- Hero treatment --- */
+.hero h1 {
+	font-size: clamp(2rem, 5vw + 0.5rem, 3.5rem);
+	line-height: 1.1;
+	font-weight: 700;
+}
+
+/* --- Code blocks: blueprint grid feel --- */
+:root {
+	--sl-color-bg-inline-code: oklch(93% 0.02 255);
+}
+
+:root[data-theme="dark"] {
+	--sl-color-bg-inline-code: oklch(20% 0.025 255);
+}
+
+/* --- Sidebar polish --- */
+nav.sidebar a[aria-current="page"] {
+	font-weight: 600;
+	border-inline-start: 2px solid var(--sl-color-accent);
+	padding-inline-start: 0.75rem;
+}
+
+/* --- Subtle blueprint grid on the content area --- */
+.main-pane {
+	background-image: linear-gradient(
+			oklch(90% 0.01 255 / 0.15) 1px,
+			transparent 1px
+		),
+		linear-gradient(90deg, oklch(90% 0.01 255 / 0.15) 1px, transparent 1px);
+	background-size: 24px 24px;
+}
+
+:root[data-theme="dark"] .main-pane {
+	background-image: linear-gradient(
+			oklch(30% 0.02 255 / 0.12) 1px,
+			transparent 1px
+		),
+		linear-gradient(90deg, oklch(30% 0.02 255 / 0.12) 1px, transparent 1px);
+}
+
+/* --- Link underlines: subtle, thicken on hover --- */
+.sl-markdown-content a:not([class]) {
+	text-decoration-thickness: 1px;
+	text-underline-offset: 0.2em;
+	transition: text-decoration-thickness 0.15s ease;
+}
+
+.sl-markdown-content a:not([class]):hover {
+	text-decoration-thickness: 2px;
+}
+
+/* --- Tabular numbers in any data context --- */
+.sl-markdown-content table {
+	font-variant-numeric: tabular-nums;
+}

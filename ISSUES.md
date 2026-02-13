@@ -20,7 +20,7 @@
   scrolling when it is not needed. File:
   `src/gpui_app/modules/popup_host.rs:331`.
 - Popup tracing writes to `/tmp` from render/update paths when
-  `RUSTYBAR_TRACE_POPUP` is set, which can block the UI thread. Examples:
+  `SINEW_TRACE_POPUP` is set, which can block the UI thread. Examples:
   `src/gpui_app/modules/popup_host.rs:160` and `src/gpui_app/bar.rs:274`.
 
 ### Medium

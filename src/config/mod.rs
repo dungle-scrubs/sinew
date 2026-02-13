@@ -82,7 +82,7 @@ pub fn get_config_path() -> PathBuf {
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join(".config")
-        .join("rustybar")
+        .join("sinew")
         .join("config.toml")
 }
 

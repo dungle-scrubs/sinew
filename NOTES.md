@@ -1,4 +1,4 @@
-# Performance Notes for RustyBar
+# Performance Notes for Sinew
 
 Research notes on GPU rendering, Rust performance, and high-performance UI frameworks.
 
@@ -170,7 +170,7 @@ lto = true
 
 ---
 
-## GPU Rendering Options for RustyBar
+## GPU Rendering Options for Sinew
 
 ### Option 1: GPUI (Zed's Framework)
 **Pros:**
@@ -216,7 +216,7 @@ lto = true
 - Still not true GPU rendering
 
 ### Recommendation
-For a menu bar app like RustyBar, **Vello + Winit** is the best balance:
+For a menu bar app like Sinew, **Vello + Winit** is the best balance:
 - Active development, good documentation
 - Pure Rust, cross-platform potential
 - Reasonable scope for integration

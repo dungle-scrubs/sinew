@@ -34,7 +34,7 @@ static AUTO_POPUP_DONE: AtomicBool = AtomicBool::new(false);
 fn auto_popup_id() -> Option<String> {
     static AUTO_POPUP_ID: OnceLock<Option<String>> = OnceLock::new();
     AUTO_POPUP_ID
-        .get_or_init(|| std::env::var("RUSTYBAR_AUTO_POPUP").ok())
+        .get_or_init(|| std::env::var("SINEW_AUTO_POPUP").ok())
         .clone()
 }
 

@@ -19,6 +19,6 @@ A full-drawer popup module for viewing runtime logs and errors.
 - Option to clear logs
 
 **Implementation Notes:**
-- Capture internal RustyBar logs (config errors, module failures, IPC issues)
+- Capture internal Sinew logs (config errors, module failures, IPC issues)
 - Store in ring buffer to limit memory usage
 - Error state tracked globally to update icon appearance

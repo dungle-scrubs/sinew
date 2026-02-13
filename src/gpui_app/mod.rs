@@ -27,10 +27,10 @@ use crate::config::load_config;
 use crate::window::get_main_screen_info;
 
 /// Menu bar window level (-20) - same as SketchyBar.
-/// This allows the macOS menu bar (level 24) to appear above RustyBar.
+/// This allows the macOS menu bar (level 24) to appear above Sinew.
 const MENU_BAR_WINDOW_LEVEL: i64 = -20;
 
-/// Runs the GPUI-based RustyBar application.
+/// Runs the GPUI-based Sinew application.
 pub fn run() {
     Application::new().run(|cx: &mut App| {
         // Get main thread marker for AppKit operations

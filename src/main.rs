@@ -11,7 +11,7 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn socket_path() -> std::path::PathBuf {
     let runtime_dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".to_string());
-    std::path::PathBuf::from(runtime_dir).join("rustybar.sock")
+    std::path::PathBuf::from(runtime_dir).join("sinew.sock")
 }
 
 /// Removes the Unix socket file on process exit.
@@ -61,7 +61,7 @@ fn start_ipc_listener() -> std::io::Result<()> {
         Ok(listener) => listener,
         Err(err) if err.kind() == std::io::ErrorKind::AddrInUse => {
             if UnixStream::connect(&socket).is_ok() {
-                eprintln!("RustyBar is already running.");
+                eprintln!("Sinew is already running.");
                 std::process::exit(0);
             }
             let _ = std::fs::remove_file(&socket);
@@ -87,11 +87,11 @@ fn start_ipc_listener() -> std::io::Result<()> {
 
 fn print_help() {
     println!(
-        "rustybar {}
+        "sinew {}
 A macOS menu bar replacement with notch-aware layouts
 
 USAGE:
-    rustybar [OPTIONS]
+    sinew [OPTIONS]
 
 OPTIONS:
     -h, --help       Print this help message
@@ -101,13 +101,13 @@ ENVIRONMENT:
     RUST_LOG         Set log level (error, warn, info, debug, trace)
 
 CONFIG:
-    ~/.config/rustybar/config.toml
+    ~/.config/sinew/config.toml
 
 EXAMPLES:
-    rustybar                    Run with default config
-    RUST_LOG=debug rustybar     Run with debug logging
+    sinew                    Run with default config
+    RUST_LOG=debug sinew     Run with debug logging
 
-For more information, see: https://github.com/dungle-scrubs/rustybar",
+For more information, see: https://github.com/dungle-scrubs/sinew",
         VERSION
     );
 }
@@ -124,12 +124,12 @@ fn main() {
                 return;
             }
             "-v" | "--version" => {
-                println!("rustybar {}", VERSION);
+                println!("sinew {}", VERSION);
                 return;
             }
             _ => {
                 eprintln!("Unknown argument: {}", args[0]);
-                eprintln!("Try 'rustybar --help' for more information.");
+                eprintln!("Try 'sinew --help' for more information.");
                 std::process::exit(1);
             }
         }
@@ -153,7 +153,7 @@ fn main() {
         })
         .init();
 
-    log::info!("Starting RustyBar v{}", VERSION);
+    log::info!("Starting Sinew v{}", VERSION);
 
     if let Err(err) = start_ipc_listener() {
         log::warn!("Failed to start IPC listener: {}", err);

@@ -1,4 +1,4 @@
-//! Command-line tool to send messages to a running RustyBar instance
+//! Command-line tool to send messages to a running Sinew instance
 
 use std::env;
 use std::io::{BufRead, BufReader, Write};
@@ -7,14 +7,14 @@ use std::path::PathBuf;
 
 fn socket_path() -> PathBuf {
     let runtime_dir = env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".to_string());
-    PathBuf::from(runtime_dir).join("rustybar.sock")
+    PathBuf::from(runtime_dir).join("sinew.sock")
 }
 
 fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
 
     if args.is_empty() {
-        eprintln!("Usage: rustybar-msg <command> [args...]");
+        eprintln!("Usage: sinew-msg <command> [args...]");
         eprintln!();
         eprintln!("Commands:");
         eprintln!("  redraw          Trigger a redraw");
@@ -45,8 +45,8 @@ fn main() {
             println!("{}", response.trim());
         }
         Err(e) => {
-            eprintln!("Failed to connect to RustyBar at {:?}: {}", socket, e);
-            eprintln!("Is RustyBar running?");
+            eprintln!("Failed to connect to Sinew at {:?}: {}", socket, e);
+            eprintln!("Is Sinew running?");
             std::process::exit(1);
         }
     }

@@ -23,7 +23,7 @@ If applicable, add screenshots.
 
 **Environment:**
 - macOS version: [e.g., 14.2]
-- RustyBar version: [e.g., 0.1.0]
+- Sinew version: [e.g., 0.1.0]
 - Display: [e.g., MacBook with notch, external monitor]
 
 **Config (if relevant)**

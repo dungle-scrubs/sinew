@@ -1,6 +1,6 @@
-# RustyBar
+# Sinew
 
-[![CI](https://github.com/dungle-scrubs/rustybar/actions/workflows/ci.yml/badge.svg)](https://github.com/dungle-scrubs/rustybar/actions/workflows/ci.yml)
+[![CI](https://github.com/dungle-scrubs/sinew/actions/workflows/ci.yml/badge.svg)](https://github.com/dungle-scrubs/sinew/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 A macOS menu bar replacement built in Rust. Features notch-aware split layouts, modular widgets, and hot-reload configuration.
@@ -25,50 +25,50 @@ A macOS menu bar replacement built in Rust. Features notch-aware split layouts, 
 ### Homebrew (recommended)
 
 ```bash
-brew install dungle-scrubs/rustybar/rustybar
+brew install dungle-scrubs/sinew/sinew
 ```
 
 ### Run at Login
 
 ```bash
-brew services start rustybar
+brew services start sinew
 ```
 
 ### Building from Source
 
 ```bash
-git clone https://github.com/dungle-scrubs/rustybar.git
-cd rustybar
+git clone https://github.com/dungle-scrubs/sinew.git
+cd sinew
 cargo build --release
-cp target/release/rustybar /usr/local/bin/
+cp target/release/sinew /usr/local/bin/
 ```
 
 ## Usage
 
 ```bash
-# Run with default config (~/.config/rustybar/config.toml)
-rustybar
+# Run with default config (~/.config/sinew/config.toml)
+sinew
 
 # Run with debug logging
-RUST_LOG=debug rustybar
+RUST_LOG=debug sinew
 ```
 
 ### IPC Commands
 
 ```bash
 # Force redraw
-cargo run --bin rustybar-msg -- redraw
+cargo run --bin sinew-msg -- redraw
 
 # Reload configuration
-cargo run --bin rustybar-msg -- reload
+cargo run --bin sinew-msg -- reload
 
 # Get status
-cargo run --bin rustybar-msg -- status
+cargo run --bin sinew-msg -- status
 ```
 
 ## Configuration
 
-Create `~/.config/rustybar/config.toml`:
+Create `~/.config/sinew/config.toml`:
 
 ```toml
 [bar]

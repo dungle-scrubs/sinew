@@ -4780,32 +4780,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b39cdef0fa800fc44525c84ccb54a029961a8215f9619753635a9c0d2538d46d"
 
 [[package]]
-name = "rustybar"
-version = "0.1.0"
-dependencies = [
- "async-channel 2.5.0",
- "block2",
- "chrono",
- "core-foundation 0.10.0",
- "core-graphics 0.24.0",
- "core-text",
- "ctrlc",
- "dirs 6.0.0",
- "env_logger",
- "foreign-types",
- "futures-util",
- "gpui",
- "log",
- "notify",
- "objc2",
- "objc2-app-kit",
- "objc2-foundation",
- "serde",
- "serde_json",
- "toml 0.8.23",
-]
-
-[[package]]
 name = "rustybuzz"
 version = "0.14.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5139,6 +5113,32 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a9c6883ca9c3c7c90e888de77b7a5c849c779d25d74a1269b0218b14e8b136c"
 dependencies = [
  "log",
+]
+
+[[package]]
+name = "sinew"
+version = "0.1.0"
+dependencies = [
+ "async-channel 2.5.0",
+ "block2",
+ "chrono",
+ "core-foundation 0.10.0",
+ "core-graphics 0.24.0",
+ "core-text",
+ "ctrlc",
+ "dirs 6.0.0",
+ "env_logger",
+ "foreign-types",
+ "futures-util",
+ "gpui",
+ "log",
+ "notify",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-foundation",
+ "serde",
+ "serde_json",
+ "toml 0.8.23",
 ]
 
 [[package]]

@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial release
 - Notch-aware split bar layout for MacBook displays
 - Four-zone module placement (left outer/inner, right outer/inner)
-- Hot-reload configuration via `~/.config/rustybar/config.toml`
+- Hot-reload configuration via `~/.config/sinew/config.toml`
 - Built-in modules: clock, date, battery, volume, CPU, memory, weather, app name, static text, script, separator
 - Calendar popup for date module
 - Toggle groups with radio-button behavior

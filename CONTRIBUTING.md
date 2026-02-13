@@ -1,13 +1,13 @@
 # Contributing
 
-Thank you for considering contributing to RustyBar!
+Thank you for considering contributing to Sinew!
 
 ## Development Setup
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/dungle-scrubs/rustybar.git
-   cd rustybar
+   git clone https://github.com/dungle-scrubs/sinew.git
+   cd sinew
    ```
 
 2. Install Rust (if not already installed):

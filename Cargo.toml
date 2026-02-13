@@ -1,13 +1,13 @@
 [package]
-name = "rustybar"
+name = "sinew"
 # x-release-please-version
 version = "0.1.0"
 edition = "2021"
 description = "A macOS menu bar replacement with notch-aware split layouts and hot-reload configuration"
 authors = ["Kevin Frilot"]
 license = "MIT"
-repository = "https://github.com/dungle-scrubs/rustybar"
-homepage = "https://github.com/dungle-scrubs/rustybar"
+repository = "https://github.com/dungle-scrubs/sinew"
+homepage = "https://github.com/dungle-scrubs/sinew"
 keywords = ["macos", "menubar", "statusbar", "appkit"]
 categories = ["gui"]
 readme = "README.md"

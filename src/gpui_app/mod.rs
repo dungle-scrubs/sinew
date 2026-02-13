@@ -36,6 +36,9 @@ pub fn run() {
         // Get main thread marker for AppKit operations
         let mtm = MainThreadMarker::new().expect("Must run on main thread");
 
+        // Hide from Dock and Cmd+Tab — Sinew is a background accessory app.
+        configure_app_identity(mtm);
+
         // Initialize module factories before loading config so validation knows types.
         modules::init_module_factories();
         crate::config::set_known_module_types(modules::registered_module_types());
@@ -106,6 +109,33 @@ pub fn run() {
 
         log::info!("GPUI app initialization complete");
     });
+}
+
+/// Hides the app from Dock/Cmd+Tab and sets the app icon.
+///
+/// Uses `NSApplicationActivationPolicyAccessory` so Sinew behaves as a
+/// background utility (like SketchyBar). The icon is loaded from the
+/// embedded .icns at compile time.
+fn configure_app_identity(mtm: MainThreadMarker) {
+    use objc2::AllocAnyThread;
+    use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy, NSImage};
+    use objc2_foundation::NSData;
+
+    let app = NSApplication::sharedApplication(mtm);
+
+    // Hide from Dock and Cmd+Tab
+    app.setActivationPolicy(NSApplicationActivationPolicy::Accessory);
+    log::info!("Activation policy set to Accessory (hidden from Dock)");
+
+    // Set app icon from embedded .icns
+    let icon_bytes = include_bytes!("../../assets/icon.icns");
+    let data = NSData::with_bytes(icon_bytes);
+    if let Some(image) = NSImage::initWithData(NSImage::alloc(), &data) {
+        unsafe { app.setApplicationIconImage(Some(&image)) };
+        log::info!("App icon set from embedded icon.icns");
+    } else {
+        log::warn!("Failed to load app icon from embedded data");
+    }
 }
 
 static PANEL_WINDOW_HANDLE: OnceLock<Mutex<Option<gpui::WindowHandle<modules::PopupHostView>>>> =

@@ -11,6 +11,10 @@
 
 A macOS menu bar replacement built in Rust. Features notch-aware split layouts, modular widgets, and hot-reload configuration.
 
+<p align="center">
+  <img src="assets/screenshot.jpg" alt="Sinew screenshot" width="800" />
+</p>
+
 ## Features
 
 - **Notch-aware layout** - Automatically splits around MacBook notch, or use fake notch on external displays

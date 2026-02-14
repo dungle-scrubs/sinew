@@ -13,6 +13,7 @@ mod date;
 mod datetime;
 mod demo;
 mod disk;
+pub mod external;
 mod memory;
 mod now_playing;
 mod popup_host;
@@ -35,6 +36,7 @@ pub use date::DateModule;
 pub use datetime::DateTimeModule;
 pub use demo::DemoModule;
 pub use disk::DiskModule;
+pub use external::ExternalModule;
 pub use memory::MemoryModule;
 pub use now_playing::NowPlayingModule;
 pub use popup_host::PopupHostView;
@@ -194,6 +196,15 @@ fn ensure_builtin_factories() {
         register_module_factory("skeleton", |id, _config| {
             Some(Box::new(SkeletonDemoModule::new(id)))
         });
+        register_module_factory("external", |id, config| {
+            let label = config
+                .label
+                .as_deref()
+                .or(config.text.as_deref())
+                .unwrap_or("");
+            let icon = config.icon.as_deref();
+            Some(Box::new(ExternalModule::new(id, label, icon)))
+        });
     });
 }
 
@@ -345,6 +356,11 @@ pub trait GpuiModule: Send + Sync {
 
     /// Called before the module is removed/replaced in the registry.
     fn on_module_stop(&mut self) {}
+
+    /// Sets a property by key/value from IPC. Returns true if the property was accepted.
+    fn set_property(&mut self, _key: &str, _value: &str) -> bool {
+        false
+    }
 }
 
 /// Module styling options.
@@ -526,22 +542,26 @@ pub fn create_module(config: &ModuleConfig, index: usize) -> Option<PositionedMo
         }
     }
 
-    module.map(|module| PositionedModule {
-        module,
-        style,
-        text_color,
-        click_command: config.click_command.clone(),
-        right_click_command: config.right_click_command.clone(),
-        group: config.group.clone(),
-        popup,
-        toggle_enabled: config.toggle,
-        toggle_active: false,
-        toggle_group: config.toggle_group.clone(),
-        flex: config.flex,
-        min_width: config.min_width.map(|v| v as f32),
-        max_width: config.max_width.map(|v| v as f32),
-        margin_left: config.margin_left.map(|v| v as f32),
-        margin_right: config.margin_right.map(|v| v as f32),
+    module.map(|module| {
+        // Register id/type for IPC `list` command
+        crate::ipc::register_module_id(module.id(), &config.module_type);
+        PositionedModule {
+            module,
+            style,
+            text_color,
+            click_command: config.click_command.clone(),
+            right_click_command: config.right_click_command.clone(),
+            group: config.group.clone(),
+            popup,
+            toggle_enabled: config.toggle,
+            toggle_active: false,
+            toggle_group: config.toggle_group.clone(),
+            flex: config.flex,
+            min_width: config.min_width.map(|v| v as f32),
+            max_width: config.max_width.map(|v| v as f32),
+            margin_left: config.margin_left.map(|v| v as f32),
+            margin_right: config.margin_right.map(|v| v as f32),
+        }
     })
 }
 

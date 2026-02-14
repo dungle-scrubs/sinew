@@ -18,6 +18,7 @@ use crate::config::{load_config, Config, ConfigWatcher, SharedConfig};
 use crate::gpui_app::camera;
 use crate::gpui_app::modules::{create_module, PositionedModule};
 use crate::gpui_app::theme::Theme;
+use crate::ipc::{self, IpcCommand};
 
 /// Global registry of all bar views for synchronized updates
 static BAR_VIEWS: Mutex<Vec<(u64, WeakEntity<BarView>)>> = Mutex::new(Vec::new());
@@ -101,6 +102,8 @@ pub struct BarView {
     camera_indicator: bool,
     /// Last known camera active state (for change detection)
     last_camera_active: bool,
+    /// Receiver for IPC commands (set, trigger, etc.)
+    ipc_rx: Receiver<IpcCommand>,
     /// Task that periodically checks camera state and triggers re-renders
     #[allow(dead_code)]
     refresh_task: Option<Task<()>>,
@@ -134,6 +137,7 @@ impl BarView {
             update_interval,
             camera_indicator: true, // TODO: read from config
             last_camera_active: camera::is_camera_active(),
+            ipc_rx: ipc::subscribe_ipc_commands(),
             refresh_task: None,
         }
     }
@@ -319,6 +323,7 @@ impl BarView {
         if let Some(ref watcher) = self.config_watcher {
             if watcher.check_and_reload() {
                 log::info!("Config reloaded, rebuilding modules");
+                ipc::clear_module_ids();
 
                 // Get the updated config
                 if let Ok(config) = self.config.read() {
@@ -365,6 +370,50 @@ impl BarView {
             }
         }
         changed
+    }
+
+    /// Drains pending IPC commands from the channel (max 100 per frame).
+    fn drain_ipc_commands(&mut self) {
+        const MAX_PER_FRAME: usize = 100;
+        for _ in 0..MAX_PER_FRAME {
+            let cmd = match self.ipc_rx.try_recv() {
+                Ok(cmd) => cmd,
+                Err(_) => break,
+            };
+            match cmd {
+                IpcCommand::Set {
+                    module_id,
+                    properties,
+                } => {
+                    if let Some(pm) = self.find_module_mut(&module_id) {
+                        for (key, value) in &properties {
+                            pm.module.set_property(key, value);
+                        }
+                    }
+                }
+                IpcCommand::Trigger { module_id, event } => match event.as_str() {
+                    "update" => {
+                        if let Some(pm) = self.find_module_mut(&module_id) {
+                            pm.module.update();
+                        }
+                    }
+                    "popup" => {
+                        crate::gpui_app::popup_manager::toggle_popup(&module_id);
+                    }
+                    _ => {}
+                },
+            }
+        }
+    }
+
+    /// Finds a mutable reference to a positioned module by ID across all zones.
+    fn find_module_mut(&mut self, id: &str) -> Option<&mut PositionedModule> {
+        self.left_outer_modules
+            .iter_mut()
+            .chain(self.left_inner_modules.iter_mut())
+            .chain(self.right_outer_modules.iter_mut())
+            .chain(self.right_inner_modules.iter_mut())
+            .find(|pm| pm.module.id() == id)
     }
 
     /// Renders a single module with its styling.
@@ -472,6 +521,9 @@ impl Render for BarView {
         if self.check_config_reload() {
             cx.notify();
         }
+
+        // Drain IPC commands (set, trigger) before updating modules
+        self.drain_ipc_commands();
 
         // Update modules periodically (rate-limited to every 500ms).
         // Skip updates while a popup is visible to keep the UI responsive.

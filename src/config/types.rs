@@ -24,6 +24,7 @@ const DEFAULT_MODULE_TYPES: &[&str] = &[
     "weather",
     "separator",
     "skeleton",
+    "external",
 ];
 
 /// Known separator types

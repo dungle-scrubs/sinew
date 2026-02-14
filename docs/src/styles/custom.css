@@ -30,15 +30,16 @@
 }
 
 /* --- Dark mode (blueprint on indigo) --- */
-/* Starlight dark mode gray scale: 1=darkest → 7=lightest.
-   gray-2: sidebar links, body text.  gray-5/6: borders, backgrounds. */
+/* Starlight gray scale is SEMANTIC, not absolute:
+   gray-1 = most foreground (lightest in dark), gray-6 = most background (darkest in dark).
+   Components: Select uses gray-1, sidebar links use gray-2, nav bg uses gray-6. */
 :root[data-theme="dark"] {
-	--sl-color-gray-1: oklch(16% 0.015 255);
+	--sl-color-gray-1: oklch(92% 0.012 255);
 	--sl-color-gray-2: oklch(75% 0.015 255);
 	--sl-color-gray-3: oklch(58% 0.018 255);
 	--sl-color-gray-4: oklch(42% 0.02 255);
-	--sl-color-gray-5: oklch(28% 0.018 255);
-	--sl-color-gray-6: oklch(20% 0.015 255);
+	--sl-color-gray-5: oklch(24% 0.018 255);
+	--sl-color-gray-6: oklch(18% 0.015 255);
 	--sl-color-gray-7: oklch(95% 0.008 255);
 
 	--sl-color-accent-low: oklch(22% 0.06 255);

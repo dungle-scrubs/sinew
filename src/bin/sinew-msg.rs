@@ -17,11 +17,13 @@ fn main() {
         eprintln!("Usage: sinew-msg <command> [args...]");
         eprintln!();
         eprintln!("Commands:");
-        eprintln!("  redraw          Trigger a redraw");
-        eprintln!("  reload          Reload configuration");
-        eprintln!("  status          Get bar status (JSON)");
-        eprintln!("  toggle          Toggle bar visibility");
-        eprintln!("  set <id> <val>  Set a module's value");
+        eprintln!("  redraw                          Trigger a bar redraw");
+        eprintln!("  reload                          Reload configuration");
+        eprintln!("  status                          Get bar status (JSON)");
+        eprintln!("  set <id> key=value [...]        Set module properties");
+        eprintln!("  get <id> [property]             Get module properties");
+        eprintln!("  list                            List all modules (JSON)");
+        eprintln!("  trigger <id> update|popup       Trigger module event");
         std::process::exit(1);
     }
 

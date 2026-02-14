@@ -5,6 +5,7 @@
 
 mod config;
 mod gpui_app;
+mod ipc;
 mod window;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -27,62 +28,8 @@ fn install_socket_cleanup() {
     }
 }
 
-/// Handles an IPC command and returns the response string.
-fn handle_ipc_command(command: &str) -> String {
-    let parts: Vec<&str> = command.trim().splitn(2, ' ').collect();
-    match parts.first().copied().unwrap_or("") {
-        "reload" | "redraw" => {
-            gpui_app::request_immediate_refresh();
-            "OK: refresh requested".to_string()
-        }
-        "status" => {
-            let status = serde_json::json!({
-                "version": VERSION,
-                "running": true,
-            });
-            status.to_string()
-        }
-        other => {
-            format!("ERR: unknown command '{}'", other)
-        }
-    }
-}
-
 fn start_ipc_listener() -> std::io::Result<()> {
-    use std::io::{BufRead, BufReader, Write};
-    use std::os::unix::net::{UnixListener, UnixStream};
-
-    let socket = socket_path();
-    if let Some(parent) = socket.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-
-    let listener = match UnixListener::bind(&socket) {
-        Ok(listener) => listener,
-        Err(err) if err.kind() == std::io::ErrorKind::AddrInUse => {
-            if UnixStream::connect(&socket).is_ok() {
-                eprintln!("Sinew is already running.");
-                std::process::exit(0);
-            }
-            let _ = std::fs::remove_file(&socket);
-            UnixListener::bind(&socket)?
-        }
-        Err(err) => return Err(err),
-    };
-
-    std::thread::spawn(move || {
-        for stream in listener.incoming().flatten() {
-            let mut reader = BufReader::new(stream);
-            let mut line = String::new();
-            let _ = reader.read_line(&mut line);
-            let response = handle_ipc_command(&line);
-            if let Ok(mut stream) = reader.into_inner().try_clone() {
-                let _ = writeln!(stream, "{}", response);
-            }
-        }
-    });
-
-    Ok(())
+    ipc::start_ipc_listener(&socket_path())
 }
 
 fn print_help() {

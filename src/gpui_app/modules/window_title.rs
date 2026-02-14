@@ -11,6 +11,7 @@ use super::{truncate_text, GpuiModule};
 use crate::gpui_app::theme::Theme;
 
 /// Window title module that displays the current window title.
+#[allow(dead_code)]
 pub struct WindowTitleModule {
     id: String,
     max_length: usize,

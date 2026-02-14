@@ -11,6 +11,7 @@ use super::{GpuiModule, LabelAlign};
 use crate::gpui_app::theme::Theme;
 
 /// Disk module that displays disk usage percentage.
+#[allow(dead_code)]
 pub struct DiskModule {
     id: String,
     path: String,
@@ -61,7 +62,7 @@ impl DiskModule {
             }
         });
 
-        let module = Self {
+        Self {
             id: id.to_string(),
             path: path.to_string(),
             label: label.map(|s| s.to_string()),
@@ -71,8 +72,7 @@ impl DiskModule {
             usage_percent,
             dirty,
             stop,
-        };
-        module
+        }
     }
 
     fn fetch_status(path: &str) -> (String, u8) {

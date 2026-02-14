@@ -51,6 +51,7 @@ impl std::fmt::Display for ConfigIssue {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize, Clone, Default)]
 pub struct Config {
     #[serde(default)]
@@ -83,6 +84,7 @@ pub struct HalfModulesConfig {
 }
 
 /// Configuration for a single module
+#[allow(dead_code)]
 #[derive(Debug, Deserialize, Clone)]
 pub struct ModuleConfig {
     /// Module type: "clock", "static", "battery", "cpu", etc.
@@ -478,6 +480,7 @@ fn validate_color(color: &str, path: &str, issues: &mut Vec<ConfigIssue>) {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize, Clone)]
 pub struct BarConfig {
     /// Height in pixels, or None for "auto" (uses system menu bar height)
@@ -653,6 +656,7 @@ fn default_theme_border() -> String {
     "#45475a".to_string()
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize, Clone)]
 pub struct ClockConfig {
     /// Time format string (chrono format)

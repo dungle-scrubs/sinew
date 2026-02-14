@@ -11,6 +11,7 @@ use crate::gpui_app::theme::Theme;
 
 /// App name module that displays the current frontmost application.
 /// Uses NSRunningApplication API directly instead of spawning osascript.
+#[allow(dead_code)]
 pub struct AppNameModule {
     id: String,
     max_length: usize,

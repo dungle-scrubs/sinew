@@ -12,6 +12,7 @@ use crate::gpui_app::primitives::icons::music;
 use crate::gpui_app::theme::Theme;
 
 /// Now playing module that displays the current track.
+#[allow(dead_code)]
 pub struct NowPlayingModule {
     id: String,
     max_length: usize,

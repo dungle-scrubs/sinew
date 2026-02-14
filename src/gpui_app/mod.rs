@@ -145,7 +145,7 @@ static POPUP_WINDOW_HANDLE: OnceLock<Mutex<Option<gpui::WindowHandle<modules::Po
 
 pub fn refresh_popup_windows<C: AppContext>(cx: &mut C) {
     if let Some(lock) = PANEL_WINDOW_HANDLE.get() {
-        if let Ok(Some(handle)) = lock.lock().map(|g| g.clone()) {
+        if let Ok(Some(handle)) = lock.lock().map(|g| *g) {
             let _ = handle.update(cx, |_view, window, cx| {
                 window.refresh();
                 cx.notify();
@@ -153,7 +153,7 @@ pub fn refresh_popup_windows<C: AppContext>(cx: &mut C) {
         }
     }
     if let Some(lock) = POPUP_WINDOW_HANDLE.get() {
-        if let Ok(Some(handle)) = lock.lock().map(|g| g.clone()) {
+        if let Ok(Some(handle)) = lock.lock().map(|g| *g) {
             let _ = handle.update(cx, |_view, window, cx| {
                 window.refresh();
                 cx.notify();
@@ -203,7 +203,7 @@ fn create_panel_window(
     {
         let lock = PANEL_WINDOW_HANDLE.get_or_init(|| Mutex::new(None));
         if let Ok(mut guard) = lock.lock() {
-            *guard = Some(window.clone());
+            *guard = Some(window);
         }
     }
 
@@ -316,7 +316,7 @@ fn create_popup_window(
     {
         let lock = POPUP_WINDOW_HANDLE.get_or_init(|| Mutex::new(None));
         if let Ok(mut guard) = lock.lock() {
-            *guard = Some(window.clone());
+            *guard = Some(window);
         }
     }
 

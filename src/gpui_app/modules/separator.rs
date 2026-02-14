@@ -41,6 +41,7 @@ impl SeparatorModule {
     }
 
     /// Creates a separator with a custom icon.
+    #[allow(dead_code)]
     pub fn with_icon(id: &str, icon: &str) -> Self {
         Self {
             id: id.to_string(),

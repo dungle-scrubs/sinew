@@ -44,6 +44,7 @@ impl ScriptOutput {
 }
 
 /// Script module that runs custom shell commands.
+#[allow(dead_code)]
 pub struct ScriptModule {
     id: String,
     command: String,

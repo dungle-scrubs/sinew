@@ -49,15 +49,14 @@ impl BatteryModule {
             }
         });
 
-        let module = Self {
+        Self {
             id: id.to_string(),
             label: label.map(|s| s.to_string()),
             level,
             charging,
             dirty,
             stop,
-        };
-        module
+        }
     }
 
     fn fetch_status() -> (u8, bool) {

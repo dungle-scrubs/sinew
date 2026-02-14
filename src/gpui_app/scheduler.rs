@@ -10,6 +10,7 @@ use std::sync::{
 use std::time::Duration;
 
 /// Schedule a repeating task that can be stopped via the provided flag.
+#[allow(dead_code)]
 pub fn schedule<F>(interval: Duration, stop: Arc<AtomicBool>, mut task: F)
 where
     F: FnMut() + Send + 'static,

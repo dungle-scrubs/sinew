@@ -1,6 +1,7 @@
 use objc2::MainThreadMarker;
 use objc2_app_kit::{NSScreen, NSStatusBar};
 
+#[allow(dead_code)]
 pub struct ScreenInfo {
     pub frame: (f64, f64, f64, f64), // x, y, width, height
     pub menu_bar_height: f64,

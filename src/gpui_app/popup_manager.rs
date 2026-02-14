@@ -168,6 +168,7 @@ pub fn max_popup_height() -> f64 {
     max_panel_height() * 0.8
 }
 
+#[allow(dead_code)]
 pub fn panel_width() -> f64 {
     let lock = SCREEN_WIDTH.get_or_init(|| Mutex::new(1440.0));
     lock.lock().map(|v| *v).unwrap_or(1440.0)
@@ -308,6 +309,7 @@ fn start_click_timestamp_monitor(mtm: MainThreadMarker) {
     });
 }
 
+#[allow(dead_code)]
 pub fn global_click_delay_ms() -> Option<u64> {
     let last = LAST_GLOBAL_CLICK_MS.load(AtomicOrdering::SeqCst);
     if last == 0 {
@@ -509,10 +511,11 @@ pub fn execute_pending_show() {
 #[cfg(test)]
 pub fn pending_show_for_test() -> Option<(PopupType, f64)> {
     let guard = PENDING_SHOW.lock().unwrap();
-    guard.clone()
+    *guard
 }
 
 /// Reposition a popup/panel window to keep it anchored to the bar after a height change.
+#[allow(dead_code)]
 pub fn reposition_popup_window(popup_type: PopupType, height: f64) {
     let Some(mtm) = MainThreadMarker::new() else {
         log::error!("reposition_popup_window: not on main thread");
@@ -607,7 +610,6 @@ pub fn reposition_popup_window(popup_type: PopupType, height: f64) {
             objc2_foundation::NSSize::new(new_width, clamped_height),
         );
         ns_window.setFrame_display(new_frame, false);
-        return;
     }
 }
 
@@ -1366,15 +1368,15 @@ fn handle_global_click(event: &NSEvent) {
         let frame = ns_window.frame();
 
         // Only check popup windows (height > 100 and visible)
-        if frame.size.height > 100.0 && ns_window.alphaValue() > 0.5 {
-            if screen_x >= frame.origin.x
-                && screen_x <= frame.origin.x + frame.size.width
-                && screen_y >= frame.origin.y
-                && screen_y <= frame.origin.y + frame.size.height
-            {
-                log::debug!("Click inside popup, ignoring");
-                return;
-            }
+        if frame.size.height > 100.0
+            && ns_window.alphaValue() > 0.5
+            && screen_x >= frame.origin.x
+            && screen_x <= frame.origin.x + frame.size.width
+            && screen_y >= frame.origin.y
+            && screen_y <= frame.origin.y + frame.size.height
+        {
+            log::debug!("Click inside popup, ignoring");
+            return;
         }
     }
 
@@ -1383,15 +1385,15 @@ fn handle_global_click(event: &NSEvent) {
         let ns_window = windows.objectAtIndex(i);
         let frame = ns_window.frame();
 
-        if frame.size.height <= 40.0 && frame.size.height > 20.0 {
-            if screen_x >= frame.origin.x
-                && screen_x <= frame.origin.x + frame.size.width
-                && screen_y >= frame.origin.y
-                && screen_y <= frame.origin.y + frame.size.height
-            {
-                log::debug!("Click on bar, letting handler deal with it");
-                return;
-            }
+        if frame.size.height <= 40.0
+            && frame.size.height > 20.0
+            && screen_x >= frame.origin.x
+            && screen_x <= frame.origin.x + frame.size.width
+            && screen_y >= frame.origin.y
+            && screen_y <= frame.origin.y + frame.size.height
+        {
+            log::debug!("Click on bar, letting handler deal with it");
+            return;
         }
     }
 

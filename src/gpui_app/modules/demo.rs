@@ -25,6 +25,7 @@ impl DemoModule {
     }
 
     /// Creates a new demo module with popup support.
+    #[allow(dead_code)]
     pub fn new_popup(theme: Theme) -> Self {
         Self {
             id: "demo".to_string(),
@@ -33,6 +34,7 @@ impl DemoModule {
     }
 
     /// Panel height for demo content.
+    #[allow(dead_code)]
     const PANEL_HEIGHT: f64 = 500.0;
 
     fn render_section(&self, theme: &Theme, title: &str, content: gpui::Div) -> gpui::Div {
@@ -183,19 +185,14 @@ impl GpuiModule for DemoModule {
     }
 
     fn popup_spec(&self) -> Option<PopupSpec> {
-        if self.theme.is_some() {
-            Some(PopupSpec::panel(
-                crate::gpui_app::popup_manager::max_panel_height(),
-            ))
-        } else {
-            None
-        }
+        self.theme.as_ref()?;
+        Some(PopupSpec::panel(
+            crate::gpui_app::popup_manager::max_panel_height(),
+        ))
     }
 
     fn render_popup(&self, theme: &Theme) -> Option<AnyElement> {
-        if self.theme.is_none() {
-            return None;
-        }
+        self.theme.as_ref()?;
 
         let min_height = crate::gpui_app::popup_manager::max_panel_height();
         Some(

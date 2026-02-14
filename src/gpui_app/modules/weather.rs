@@ -19,10 +19,12 @@ pub enum LoadingMode {
     #[default]
     Skeleton,
     /// Hide the module entirely until loaded.
+    #[allow(dead_code)]
     Hidden,
 }
 
 /// Weather data from API.
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 struct WeatherData {
     temp: String,
@@ -31,6 +33,7 @@ struct WeatherData {
 }
 
 /// Weather module with async loading support.
+#[allow(dead_code)]
 pub struct WeatherModule {
     id: String,
     location: String,
@@ -66,7 +69,7 @@ impl WeatherModule {
             std::thread::sleep(interval);
         });
 
-        let module = Self {
+        Self {
             id: id.to_string(),
             location,
             update_interval: interval,
@@ -74,11 +77,11 @@ impl WeatherModule {
             dirty,
             loading_mode: LoadingMode::Skeleton,
             stop,
-        };
-        module
+        }
     }
 
     /// Sets the loading display mode.
+    #[allow(dead_code)]
     pub fn with_loading_mode(mut self, mode: LoadingMode) -> Self {
         self.loading_mode = mode;
         self
@@ -129,9 +132,9 @@ impl WeatherModule {
                     });
                 }
             }
-            return LoadingState::Error("Invalid response".to_string());
+            LoadingState::Error("Invalid response".to_string())
         } else {
-            return LoadingState::Error("Fetch failed".to_string());
+            LoadingState::Error("Fetch failed".to_string())
         }
     }
 }

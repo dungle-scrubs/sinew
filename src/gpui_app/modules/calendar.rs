@@ -33,6 +33,7 @@ const TIMEZONE_PADDING_X: f32 = 12.0;
 const SLIDER_WIDTH: f32 = 232.0;
 
 /// Calendar module providing datetime bar item and calendar/timezone popup.
+#[allow(dead_code)]
 pub struct CalendarModule {
     theme: Theme,
     date_format: String,
@@ -153,6 +154,7 @@ impl CalendarModule {
     }
 
     /// Navigate to today.
+    #[allow(dead_code)]
     fn go_to_today(&mut self) {
         let today = Local::now().date_naive();
         self.displayed_year = today.year();

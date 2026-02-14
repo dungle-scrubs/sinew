@@ -335,25 +335,45 @@ mod tests {
 
     #[test]
     fn rgba_to_hex_black() {
-        let c = gpui::Rgba { r: 0.0, g: 0.0, b: 0.0, a: 1.0 };
+        let c = gpui::Rgba {
+            r: 0.0,
+            g: 0.0,
+            b: 0.0,
+            a: 1.0,
+        };
         assert_eq!(rgba_to_hex(c), "#000000");
     }
 
     #[test]
     fn rgba_to_hex_white() {
-        let c = gpui::Rgba { r: 1.0, g: 1.0, b: 1.0, a: 1.0 };
+        let c = gpui::Rgba {
+            r: 1.0,
+            g: 1.0,
+            b: 1.0,
+            a: 1.0,
+        };
         assert_eq!(rgba_to_hex(c), "#ffffff");
     }
 
     #[test]
     fn rgba_to_hex_red() {
-        let c = gpui::Rgba { r: 1.0, g: 0.0, b: 0.0, a: 1.0 };
+        let c = gpui::Rgba {
+            r: 1.0,
+            g: 0.0,
+            b: 0.0,
+            a: 1.0,
+        };
         assert_eq!(rgba_to_hex(c), "#ff0000");
     }
 
     #[test]
     fn rgba_to_hex_ignores_alpha() {
-        let c = gpui::Rgba { r: 0.5, g: 0.5, b: 0.5, a: 0.0 };
+        let c = gpui::Rgba {
+            r: 0.5,
+            g: 0.5,
+            b: 0.5,
+            a: 0.0,
+        };
         assert_eq!(rgba_to_hex(c), "#7f7f7f");
     }
 
@@ -366,7 +386,12 @@ mod tests {
 
     #[test]
     fn format_opt_color_some() {
-        let c = gpui::Rgba { r: 1.0, g: 0.0, b: 0.0, a: 1.0 };
+        let c = gpui::Rgba {
+            r: 1.0,
+            g: 0.0,
+            b: 0.0,
+            a: 1.0,
+        };
         assert_eq!(format_opt_color(Some(c)), "#ff0000");
     }
 
@@ -437,6 +462,8 @@ mod tests {
     fn register_and_list_module_ids() {
         register_module_id("test-ipc-mod", "external");
         let ids = all_module_ids();
-        assert!(ids.iter().any(|(id, t)| id == "test-ipc-mod" && t == "external"));
+        assert!(ids
+            .iter()
+            .any(|(id, t)| id == "test-ipc-mod" && t == "external"));
     }
 }

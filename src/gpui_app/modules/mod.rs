@@ -223,6 +223,7 @@ pub fn get_popup_config(id: &str) -> Option<PopupConfig> {
         .and_then(|map| map.get(id).cloned())
 }
 
+#[allow(dead_code)]
 pub fn clear_popup_configs() {
     if let Ok(mut map) = popup_config_map().write() {
         map.clear();
@@ -254,6 +255,7 @@ pub struct PopupSpec {
 
 impl PopupSpec {
     /// Creates a new popup spec.
+    #[allow(dead_code)]
     pub fn new(width: f64, height: f64) -> Self {
         Self {
             width,
@@ -274,6 +276,7 @@ impl PopupSpec {
     }
 
     /// Sets the anchor position.
+    #[allow(dead_code)]
     pub fn with_anchor(mut self, anchor: PopupAnchor) -> Self {
         self.anchor = anchor;
         self
@@ -288,8 +291,10 @@ pub enum PopupEvent {
     /// Popup was closed
     Closed,
     /// Mouse entered popup
+    #[allow(dead_code)]
     MouseEntered,
     /// Mouse left popup
+    #[allow(dead_code)]
     MouseLeft,
     /// Scroll event with delta
     Scroll { delta_x: f32, delta_y: f32 },
@@ -325,11 +330,13 @@ pub trait GpuiModule: Send + Sync {
 
     /// Returns the current value (0-100) for threshold-based coloring.
     /// Returns None if the module doesn't support value-based colors.
+    #[allow(dead_code)]
     fn value(&self) -> Option<u8> {
         None
     }
 
     /// Returns true if the module is currently loading.
+    #[allow(dead_code)]
     fn is_loading(&self) -> bool {
         false
     }
@@ -364,6 +371,7 @@ pub trait GpuiModule: Send + Sync {
 }
 
 /// Module styling options.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Default)]
 pub struct ModuleStyle {
     /// Background color (RGBA)
@@ -393,6 +401,7 @@ pub struct ModuleStyle {
 }
 
 /// Popup configuration for a module.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Default)]
 pub struct PopupConfig {
     /// Popup type: "calendar", "info", "script", "demo", "news", "panel"
@@ -428,6 +437,7 @@ pub enum LabelAlign {
 }
 
 /// A positioned module within the bar.
+#[allow(dead_code)]
 pub struct PositionedModule {
     /// The module implementation
     pub module: Box<dyn GpuiModule>,
@@ -618,6 +628,7 @@ impl ModuleRegistry {
     }
 
     /// Returns all registered module IDs.
+    #[allow(dead_code)]
     pub fn ids(&self) -> Vec<String> {
         self.modules.keys().cloned().collect()
     }
@@ -633,6 +644,7 @@ impl Default for ModuleRegistry {
 static MODULE_REGISTRY: RwLock<Option<ModuleRegistry>> = RwLock::new(None);
 static MODULE_GENERATION: AtomicU64 = AtomicU64::new(0);
 
+#[allow(dead_code)]
 pub fn module_generation() -> u64 {
     MODULE_GENERATION.load(Ordering::Relaxed)
 }
@@ -704,10 +716,7 @@ pub fn dispatch_popup_event(module_id: &str, event: PopupEvent) {
 
 /// Gets the popup spec for a module.
 pub fn get_popup_spec(id: &str) -> Option<PopupSpec> {
-    let spec = get_module(id).and_then(|m| m.read().ok().and_then(|e| e.popup_spec()));
-    let Some(mut spec) = spec else {
-        return None;
-    };
+    let mut spec = get_module(id).and_then(|m| m.read().ok().and_then(|e| e.popup_spec()))?;
     if let Some(cfg) = get_popup_config(id) {
         if cfg.width > 0.0 {
             spec.width = cfg.width as f64;

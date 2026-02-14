@@ -44,7 +44,7 @@ impl MemoryModule {
             }
         });
 
-        let module = Self {
+        Self {
             id: id.to_string(),
             label: label.map(|s| s.to_string()),
             label_align,
@@ -52,8 +52,7 @@ impl MemoryModule {
             usage,
             dirty,
             stop,
-        };
-        module
+        }
     }
 
     fn fetch_status() -> u8 {

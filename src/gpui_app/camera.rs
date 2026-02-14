@@ -91,6 +91,7 @@ pub fn is_camera_active() -> bool {
 }
 
 /// Check if camera state changed since last check (and clear the flag).
+#[allow(dead_code)]
 pub fn take_state_changed() -> bool {
     CAMERA_STATE_CHANGED.swap(false, Ordering::Relaxed)
 }
@@ -186,7 +187,7 @@ fn trigger_ui_refresh() {
 
     unsafe {
         dispatch_async_f(
-            &_dispatch_main_q as *const _ as *const std::ffi::c_void,
+            &_dispatch_main_q as *const _,
             std::ptr::null_mut(),
             post_event,
         );
@@ -375,6 +376,7 @@ pub mod colors {
     };
 
     /// Slightly brighter red for borders when camera is active
+    #[allow(dead_code)]
     pub const RECORDING_BORDER: Rgba = Rgba {
         r: 0.7,
         g: 0.15,

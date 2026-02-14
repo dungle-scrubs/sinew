@@ -30,13 +30,15 @@
 }
 
 /* --- Dark mode (blueprint on indigo) --- */
+/* Starlight dark mode gray scale: 1=darkest → 7=lightest.
+   gray-2: sidebar links, body text.  gray-5/6: borders, backgrounds. */
 :root[data-theme="dark"] {
-	--sl-color-gray-1: oklch(18% 0.015 255);
-	--sl-color-gray-2: oklch(22% 0.018 255);
-	--sl-color-gray-3: oklch(34% 0.02 255);
-	--sl-color-gray-4: oklch(55% 0.02 255);
-	--sl-color-gray-5: oklch(72% 0.015 255);
-	--sl-color-gray-6: oklch(88% 0.01 255);
+	--sl-color-gray-1: oklch(16% 0.015 255);
+	--sl-color-gray-2: oklch(75% 0.015 255);
+	--sl-color-gray-3: oklch(58% 0.018 255);
+	--sl-color-gray-4: oklch(42% 0.02 255);
+	--sl-color-gray-5: oklch(28% 0.018 255);
+	--sl-color-gray-6: oklch(20% 0.015 255);
 	--sl-color-gray-7: oklch(95% 0.008 255);
 
 	--sl-color-accent-low: oklch(22% 0.06 255);
@@ -45,7 +47,7 @@
 
 	--sl-color-bg-nav: oklch(14% 0.018 255);
 	--sl-color-bg-sidebar: oklch(14% 0.018 255);
-	--sl-color-text: var(--sl-color-gray-6);
+	--sl-color-text: var(--sl-color-gray-2);
 	--sl-color-text-accent: oklch(72% 0.1 255);
 
 	/* Reduce body font weight for dark bg readability */
@@ -83,19 +85,15 @@ nav.sidebar a[aria-current="page"] {
 
 /* --- Subtle blueprint grid on the content area --- */
 .main-pane {
-	background-image: linear-gradient(
-			oklch(90% 0.01 255 / 0.15) 1px,
-			transparent 1px
-		),
+	background-image:
+		linear-gradient(oklch(90% 0.01 255 / 0.15) 1px, transparent 1px),
 		linear-gradient(90deg, oklch(90% 0.01 255 / 0.15) 1px, transparent 1px);
 	background-size: 24px 24px;
 }
 
 :root[data-theme="dark"] .main-pane {
-	background-image: linear-gradient(
-			oklch(30% 0.02 255 / 0.12) 1px,
-			transparent 1px
-		),
+	background-image:
+		linear-gradient(oklch(30% 0.02 255 / 0.12) 1px, transparent 1px),
 		linear-gradient(90deg, oklch(30% 0.02 255 / 0.12) 1px, transparent 1px);
 }
 

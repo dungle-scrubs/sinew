@@ -191,6 +191,12 @@ impl BarView {
                         }
                     }
                     _ = timer_fut => {
+                        // Always refresh on the 1s timer so modules with
+                        // background threads (weather, etc.) get their
+                        // dirty flags polled. The 500ms rate-limit on
+                        // update_modules() prevents excessive work.
+                        should_refresh = true;
+
                         let current_active = camera::is_camera_active();
                         if current_active != last_camera_active {
                             log::info!(
@@ -199,11 +205,9 @@ impl BarView {
                                 current_active
                             );
                             last_camera_active = current_active;
-                            should_refresh = true;
                         }
                         if APP_CHANGED.swap(false, Ordering::SeqCst) {
                             log::debug!("Active app changed, refreshing");
-                            should_refresh = true;
                         }
                     }
                 }
@@ -327,6 +331,9 @@ impl BarView {
 
                 // Get the updated config
                 if let Ok(config) = self.config.read() {
+                    // Sync launch agent state
+                    crate::launch_agent::sync(config.bar.launch_at_login);
+
                     // Update theme
                     self.theme = Theme::from_config(&config.bar);
 

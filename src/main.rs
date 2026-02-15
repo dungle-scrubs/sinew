@@ -6,6 +6,7 @@
 mod config;
 mod gpui_app;
 mod ipc;
+mod launch_agent;
 mod window;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");

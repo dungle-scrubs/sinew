@@ -45,6 +45,7 @@ pub fn run() {
 
         // Load config
         let config = load_config();
+        crate::launch_agent::sync(config.bar.launch_at_login);
         let bar_height = config.bar.height.unwrap_or(32.0);
 
         // Get screen info

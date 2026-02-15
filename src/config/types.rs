@@ -524,6 +524,10 @@ pub struct BarConfig {
     /// Default: true. Note: Updates when user interacts with the bar.
     #[serde(default = "default_camera_indicator")]
     pub camera_indicator: bool,
+    /// Automatically launch Sinew when the user logs in (installs a launchd agent)
+    /// Default: false
+    #[serde(default)]
+    pub launch_at_login: bool,
 }
 
 fn default_camera_indicator() -> bool {
@@ -547,6 +551,7 @@ impl Default for BarConfig {
             popup_text_color: None,
             theme: ThemeConfig::default(),
             camera_indicator: default_camera_indicator(),
+            launch_at_login: false,
         }
     }
 }

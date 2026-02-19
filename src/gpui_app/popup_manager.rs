@@ -616,6 +616,7 @@ pub fn reposition_popup_window(popup_type: PopupType, height: f64) {
 // Thread-local storage for event monitors.
 thread_local! {
     static EVENT_MONITOR: RefCell<Option<Retained<AnyObject>>> = const { RefCell::new(None) };
+    static KEY_MONITOR: RefCell<Option<Retained<AnyObject>>> = const { RefCell::new(None) };
     static WINDOW_OBSERVERS: RefCell<Vec<Retained<AnyObject>>> = const { RefCell::new(Vec::new()) };
     static CLICK_TS_MONITOR: RefCell<Option<Retained<AnyObject>>> = const { RefCell::new(None) };
 }
@@ -758,6 +759,7 @@ pub fn hide_popup() {
 
         // Remove monitors
         remove_global_click_monitor();
+        remove_global_key_monitor();
     }
 }
 
@@ -909,7 +911,7 @@ fn show_popup_window_appkit(popup_type: PopupType, height: f64) -> bool {
         };
         let new_y = bar_y - desired_height;
 
-        if popup_type == PopupType::Popup {
+        let new_frame = if popup_type == PopupType::Popup {
             // Get mouse position as trigger location
             let (trigger_x, trigger_y, source) = if let Some((x, y)) = take_popup_anchor() {
                 (x, y, "anchor")
@@ -941,84 +943,94 @@ fn show_popup_window_appkit(popup_type: PopupType, height: f64) -> bool {
                 clamped
             ));
 
-            // Only reposition, don't change size
-            let new_frame = objc2_foundation::NSRect::new(
+            log::info!("Repositioned popup to ({}, {})", popup_x, new_y);
+            objc2_foundation::NSRect::new(
                 objc2_foundation::NSPoint::new(popup_x, new_y),
                 objc2_foundation::NSSize::new(new_width, desired_height),
-            );
-            ns_window.setFrame_display(new_frame, false);
-            log::info!("Repositioned popup to ({}, {})", popup_x, new_y);
+            )
         } else {
-            let new_frame = objc2_foundation::NSRect::new(
+            objc2_foundation::NSRect::new(
                 objc2_foundation::NSPoint::new(frame.origin.x, new_y),
                 objc2_foundation::NSSize::new(new_width, desired_height),
-            );
+            )
+        };
+
+        // Defer AppKit window mutations to the next run-loop turn.
+        // Mutating frames during GPUI event dispatch can trigger re-entrant
+        // window callbacks and produce `RefCell already borrowed` errors.
+        let block = RcBlock::new(move || {
             ns_window.setFrame_display(new_frame, false);
-        }
-        let post_frame = ns_window.frame();
-        log::info!(
-            "show_popup_window_appkit frame_after type={:?} frame=({:.1},{:.1}) {:.1}x{:.1}",
-            popup_type,
-            post_frame.origin.x,
-            post_frame.origin.y,
-            post_frame.size.width,
-            post_frame.size.height
-        );
-        trace_popup(&format!(
-            "show_popup_window_appkit frame_after type={:?} frame=({:.1},{:.1}) {:.1}x{:.1}",
-            popup_type,
-            post_frame.origin.x,
-            post_frame.origin.y,
-            post_frame.size.width,
-            post_frame.size.height
-        ));
+            let post_frame = ns_window.frame();
+            log::info!(
+                "show_popup_window_appkit frame_after type={:?} frame=({:.1},{:.1}) {:.1}x{:.1}",
+                popup_type,
+                post_frame.origin.x,
+                post_frame.origin.y,
+                post_frame.size.width,
+                post_frame.size.height
+            );
+            trace_popup(&format!(
+                "show_popup_window_appkit frame_after type={:?} frame=({:.1},{:.1}) {:.1}x{:.1}",
+                popup_type,
+                post_frame.origin.x,
+                post_frame.origin.y,
+                post_frame.size.width,
+                post_frame.size.height
+            ));
 
-        // Show window just above bar level (-20) but below normal windows (0).
-        // This keeps popups visible over the bar without floating above other apps.
+            // Show window just above bar level (-20) but below normal windows (0).
+            // This keeps popups visible over the bar without floating above other apps.
+            unsafe {
+                let _: () = objc2::msg_send![&ns_window, setLevel: -19_i64];
+            }
+            ns_window.setAlphaValue(1.0);
+            ns_window.setOpaque(true);
+            ns_window.setIgnoresMouseEvents(false);
+
+            // Disable AppKit window animations to reduce first-open latency.
+            use objc2_app_kit::NSWindowAnimationBehavior;
+            ns_window.setAnimationBehavior(NSWindowAnimationBehavior::None);
+
+            // Background color is set by GPUI via the PopupHostView theme.
+            // Don't override it here — that would ignore the user's config.
+
+            ns_window.setAcceptsMouseMovedEvents(true);
+            // Order front without activating the window.
+            ns_window.orderFrontRegardless();
+            trace_popup(&format!(
+                "show_popup_window_appkit visible={} alpha={:.2} key={} ignores_mouse={}",
+                ns_window.isVisible(),
+                ns_window.alphaValue(),
+                ns_window.isKeyWindow(),
+                ns_window.ignoresMouseEvents()
+            ));
+            trace_popup(&format!(
+                "show_popup_window_appkit occlusion={:?}",
+                ns_window.occlusionState()
+            ));
+            log_popup_window_state_later(popup_type, "after_show_150ms");
+            mark_popup_window_shown(popup_type);
+
+            // Start monitors
+            if let Some(mtm) = MainThreadMarker::new() {
+                start_global_click_monitor(mtm);
+            }
+            start_global_key_monitor();
+
+            log::info!(
+                "Popup window shown: type={:?}, width={}",
+                popup_type,
+                new_width
+            );
+            trace_popup(&format!(
+                "show_popup_window_appkit shown type={:?} took={:?}",
+                popup_type,
+                show_start.elapsed()
+            ));
+        });
         unsafe {
-            let _: () = objc2::msg_send![&ns_window, setLevel: -19_i64];
+            NSRunLoop::mainRunLoop().performBlock(&block);
         }
-        ns_window.setAlphaValue(1.0);
-        ns_window.setOpaque(true);
-        ns_window.setIgnoresMouseEvents(false);
-
-        // Disable AppKit window animations to reduce first-open latency.
-        use objc2_app_kit::NSWindowAnimationBehavior;
-        ns_window.setAnimationBehavior(NSWindowAnimationBehavior::None);
-
-        // Background color is set by GPUI via the PopupHostView theme.
-        // Don't override it here — that would ignore the user's config.
-
-        ns_window.setAcceptsMouseMovedEvents(true);
-        // Order front without activating the window.
-        ns_window.orderFrontRegardless();
-        trace_popup(&format!(
-            "show_popup_window_appkit visible={} alpha={:.2} key={} ignores_mouse={}",
-            ns_window.isVisible(),
-            ns_window.alphaValue(),
-            ns_window.isKeyWindow(),
-            ns_window.ignoresMouseEvents()
-        ));
-        trace_popup(&format!(
-            "show_popup_window_appkit occlusion={:?}",
-            ns_window.occlusionState()
-        ));
-        log_popup_window_state_later(popup_type, "after_show_150ms");
-        mark_popup_window_shown(popup_type);
-
-        // Start monitors
-        start_global_click_monitor(mtm);
-
-        log::info!(
-            "Popup window shown: type={:?}, width={}",
-            popup_type,
-            new_width
-        );
-        trace_popup(&format!(
-            "show_popup_window_appkit shown type={:?} took={:?}",
-            popup_type,
-            show_start.elapsed()
-        ));
         return true;
     }
 
@@ -1347,6 +1359,54 @@ fn remove_global_click_monitor() {
     });
 }
 
+/// Starts the global key monitor for keyboard dismissal.
+fn start_global_key_monitor() {
+    let already_active = KEY_MONITOR.with(|cell| cell.borrow().is_some());
+    if already_active {
+        return;
+    }
+
+    log::info!("Starting global key monitor");
+
+    let handler = RcBlock::new(|event: NonNull<NSEvent>| {
+        let event: &NSEvent = unsafe { event.as_ref() };
+        handle_global_key(event);
+    });
+
+    let mask = NSEventMask::KeyDown;
+    let monitor: Option<Retained<AnyObject>> =
+        NSEvent::addGlobalMonitorForEventsMatchingMask_handler(mask, &handler);
+
+    if let Some(mon) = monitor {
+        KEY_MONITOR.with(|cell| {
+            *cell.borrow_mut() = Some(mon);
+        });
+    }
+}
+
+/// Removes the global key monitor.
+fn remove_global_key_monitor() {
+    KEY_MONITOR.with(|cell| {
+        if let Some(monitor) = cell.borrow_mut().take() {
+            log::info!("Removing global key monitor");
+            unsafe {
+                NSEvent::removeMonitor(&monitor);
+            }
+        }
+    });
+}
+
+/// Handles a global key event.
+fn handle_global_key(event: &NSEvent) {
+    // Escape key code on macOS
+    const ESC_KEY_CODE: u16 = 53;
+
+    if POPUP_VISIBLE.load(Ordering::SeqCst) && event.keyCode() == ESC_KEY_CODE {
+        log::info!("Escape pressed, hiding popup");
+        hide_popup();
+    }
+}
+
 /// Handles a global click event.
 fn handle_global_click(event: &NSEvent) {
     let location = event.locationInWindow();
@@ -1414,4 +1474,6 @@ pub fn init() {
 pub fn hide_popups_on_create() {
     POPUP_VISIBLE.store(false, Ordering::SeqCst);
     hide_all_popup_windows();
+    remove_global_click_monitor();
+    remove_global_key_monitor();
 }

@@ -77,7 +77,7 @@ pub fn run() {
         let theme = theme::Theme::from_config(&config.bar);
         modules::init_modules(&theme);
 
-        create_bar_window(cx, mtm, screen_x, macos_y, screen_width, bar_height);
+        create_bar_window(cx, screen_x, macos_y, screen_width, bar_height);
 
         // Create the panel window (hidden by default)
         let panel_height = 500.0; // Max panel height, will resize based on content
@@ -86,7 +86,6 @@ pub fn run() {
 
         create_panel_window(
             cx,
-            mtm,
             panel_x,
             macos_y,
             panel_width,
@@ -100,16 +99,62 @@ pub fn run() {
         let popup_height = 720.0; // Initial estimate, will resize
         let popup_x = screen_x + screen_width - popup_width - 80.0;
 
-        create_popup_window(cx, mtm, popup_x, macos_y, popup_width, popup_height, theme);
+        create_popup_window(cx, popup_x, macos_y, popup_width, popup_height, theme);
 
-        // Hide all popups immediately after creation
-        popup_manager::hide_popups_on_create();
-
-        // Warm up popup rendering to avoid first-open latency.
-        popup_manager::warmup_popups();
+        // Defer AppKit window mutations until the next run-loop turn.
+        // Running these while GPUI is mid-update causes re-entrant borrow errors.
+        schedule_window_configuration(
+            screen_x,
+            macos_y,
+            screen_width,
+            bar_height,
+            panel_x,
+            panel_width,
+            panel_height,
+            popup_x,
+            popup_width,
+            popup_height,
+        );
 
         log::info!("GPUI app initialization complete");
     });
+}
+
+/// Schedules all startup AppKit window mutations on the next main run-loop turn.
+///
+/// Doing these mutations while GPUI is still inside its startup update causes
+/// re-entrant `RefCell already borrowed` errors from GPUI's window callbacks.
+fn schedule_window_configuration(
+    bar_x: f64,
+    bar_y: f64,
+    bar_width: f64,
+    bar_height: f64,
+    panel_x: f64,
+    panel_width: f64,
+    panel_height: f64,
+    popup_x: f64,
+    popup_width: f64,
+    popup_height: f64,
+) {
+    use block2::RcBlock;
+    use objc2_foundation::NSRunLoop;
+
+    let block = RcBlock::new(move || {
+        let Some(mtm) = MainThreadMarker::new() else {
+            return;
+        };
+
+        configure_bar_window(mtm, bar_x, bar_y, bar_width, bar_height);
+        configure_panel_window(mtm, panel_x, bar_y, panel_width, panel_height);
+        configure_popup_window(mtm, popup_x, bar_y, popup_width, popup_height);
+
+        popup_manager::hide_popups_on_create();
+        popup_manager::warmup_popups();
+    });
+
+    unsafe {
+        NSRunLoop::mainRunLoop().performBlock(&block);
+    }
 }
 
 /// Hides the app from Dock/Cmd+Tab and sets the app icon.
@@ -165,7 +210,6 @@ pub fn refresh_popup_windows<C: AppContext>(cx: &mut C) {
 
 fn create_panel_window(
     cx: &mut App,
-    mtm: MainThreadMarker,
     x: f64,
     macos_y: f64,
     width: f64,
@@ -208,18 +252,8 @@ fn create_panel_window(
         }
     }
 
-    // Configure panel window position
-    window
-        .update(cx, |_, _window, _cx| {
-            configure_panel_window(mtm, x, macos_y, width, height);
-        })
-        .ok();
-
     // In case a popup was requested before windows existed, retry showing now.
     popup_manager::execute_pending_show();
-
-    // Warm up the panel window to avoid first-open latency.
-    refresh_popup_windows(cx);
 }
 
 /// Configure the panel window
@@ -278,7 +312,6 @@ fn configure_panel_window(mtm: MainThreadMarker, x: f64, bar_y: f64, width: f64,
 
 fn create_popup_window(
     cx: &mut App,
-    mtm: MainThreadMarker,
     x: f64,
     macos_y: f64,
     width: f64,
@@ -321,17 +354,8 @@ fn create_popup_window(
         }
     }
 
-    window
-        .update(cx, |_, _window, _cx| {
-            configure_popup_window(mtm, x, macos_y, width, height);
-        })
-        .ok();
-
     // In case a popup was requested before windows existed, retry showing now.
     popup_manager::execute_pending_show();
-
-    // Warm up the popup window to avoid first-open latency.
-    refresh_popup_windows(cx);
 }
 
 fn configure_popup_window(mtm: MainThreadMarker, x: f64, bar_y: f64, width: f64, height: f64) {
@@ -397,14 +421,7 @@ fn configure_popup_window(mtm: MainThreadMarker, x: f64, bar_y: f64, width: f64,
     }
 }
 
-fn create_bar_window(
-    cx: &mut App,
-    mtm: MainThreadMarker,
-    x: f64,
-    macos_y: f64,
-    width: f64,
-    height: f64,
-) {
+fn create_bar_window(cx: &mut App, x: f64, macos_y: f64, width: f64, height: f64) {
     let bounds = Bounds {
         origin: point(px(x as f32), px(0.0)),
         size: size(px(width as f32), px(height as f32)),
@@ -418,7 +435,7 @@ fn create_bar_window(
         macos_y
     );
 
-    let window = cx
+    let _window = cx
         .open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
@@ -433,12 +450,6 @@ fn create_bar_window(
             |_window, cx| cx.new(|_cx| BarView::new()),
         )
         .expect("Failed to create bar window");
-
-    window
-        .update(cx, |_, _window, _cx| {
-            configure_bar_window(mtm, x, macos_y, width, height);
-        })
-        .ok();
 }
 
 /// Configure the NSWindow for menu bar appearance

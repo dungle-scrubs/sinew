@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if ! command -v trufflehog >/dev/null 2>&1; then
+  echo "❌ trufflehog is required for pre-push secret scanning."
+  echo "Install with: brew install trufflehog"
+  exit 1
+fi
+
+remote_name="${1:-origin}"
+default_base_sha=""
+
+remote_head_ref="$(git symbolic-ref --quiet --short "refs/remotes/${remote_name}/HEAD" 2>/dev/null || true)"
+if [[ -n "$remote_head_ref" ]]; then
+  default_base_sha="$(git rev-parse "$remote_head_ref" 2>/dev/null || true)"
+fi
+
+scan_count=0
+while IFS=' ' read -r local_ref local_sha remote_ref remote_sha; do
+  [[ -z "${local_ref:-}" ]] && continue
+
+  # Skip deletes.
+  if [[ "$local_sha" == "0000000000000000000000000000000000000000" ]]; then
+    continue
+  fi
+
+  since_commit=""
+  if [[ "$remote_sha" != "0000000000000000000000000000000000000000" ]]; then
+    since_commit="$remote_sha"
+  elif [[ -n "$default_base_sha" ]]; then
+    since_commit="$(git merge-base "$local_sha" "$default_base_sha" 2>/dev/null || true)"
+  fi
+
+  if [[ -z "$since_commit" ]]; then
+    since_commit="$(git rev-list --max-parents=0 "$local_sha" | tail -n 1)"
+  fi
+
+  branch_name="$local_ref"
+  case "$branch_name" in
+    refs/heads/*) branch_name="${branch_name#refs/heads/}" ;;
+  esac
+
+  echo "🔎 trufflehog scan: ${branch_name} (${since_commit}..${local_sha})"
+  trufflehog git \
+    --fail \
+    --since-commit "$since_commit" \
+    --branch "$branch_name" \
+    "file://."
+
+  scan_count=$((scan_count + 1))
+done
+
+if [[ "$scan_count" -eq 0 ]]; then
+  echo "ℹ️ no refs to scan"
+else
+  echo "✅ trufflehog pre-push scan passed"
+fi

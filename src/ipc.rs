@@ -107,15 +107,82 @@ pub fn handle_ipc_command(command: &str) -> String {
     }
 }
 
+/// Splits command arguments while honoring shell-like quotes and escapes.
+fn tokenize_args(input: &str) -> Result<Vec<String>, String> {
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum QuoteState {
+        None,
+        Single,
+        Double,
+    }
+
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut quote = QuoteState::None;
+    let mut escaped = false;
+
+    for ch in input.chars() {
+        if escaped {
+            current.push(match ch {
+                'n' => '\n',
+                'r' => '\r',
+                't' => '\t',
+                other => other,
+            });
+            escaped = false;
+            continue;
+        }
+
+        match quote {
+            QuoteState::None => match ch {
+                '\\' => escaped = true,
+                '\'' => quote = QuoteState::Single,
+                '"' => quote = QuoteState::Double,
+                c if c.is_whitespace() => {
+                    if !current.is_empty() {
+                        tokens.push(std::mem::take(&mut current));
+                    }
+                }
+                _ => current.push(ch),
+            },
+            QuoteState::Single => match ch {
+                '\'' => quote = QuoteState::None,
+                _ => current.push(ch),
+            },
+            QuoteState::Double => match ch {
+                '"' => quote = QuoteState::None,
+                '\\' => escaped = true,
+                _ => current.push(ch),
+            },
+        }
+    }
+
+    if escaped {
+        return Err("trailing escape in arguments".to_string());
+    }
+    if quote != QuoteState::None {
+        return Err("unterminated quote in arguments".to_string());
+    }
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+
+    Ok(tokens)
+}
+
 /// `set <module_id> key=value [key=value ...]`
 fn handle_set(args: &str) -> String {
-    let mut tokens = args.split_whitespace();
-    let Some(module_id) = tokens.next() else {
+    let tokens = match tokenize_args(args) {
+        Ok(tokens) => tokens,
+        Err(err) => return format!("ERR: {}", err),
+    };
+
+    let Some((module_id, property_tokens)) = tokens.split_first() else {
         return "ERR: set requires <module_id> key=value".to_string();
     };
 
     let mut properties = Vec::new();
-    for token in tokens {
+    for token in property_tokens {
         if let Some((key, value)) = parse_kv(token) {
             properties.push((key, value));
         } else {
@@ -148,11 +215,15 @@ fn parse_kv(token: &str) -> Option<(String, String)> {
 
 /// `get <module_id> [property]` — reads ExternalState directly (no GPUI round-trip).
 fn handle_get(args: &str) -> String {
-    let mut tokens = args.split_whitespace();
-    let Some(module_id) = tokens.next() else {
+    let tokens = match tokenize_args(args) {
+        Ok(tokens) => tokens,
+        Err(err) => return format!("ERR: {}", err),
+    };
+
+    let Some((module_id, rest)) = tokens.split_first() else {
         return "ERR: get requires <module_id>".to_string();
     };
-    let property = tokens.next();
+    let property = rest.first().map(String::as_str);
 
     let Some(state) = get_external_state(module_id) else {
         return format!("ERR: module '{}' not found or not external", module_id);
@@ -203,13 +274,24 @@ fn handle_list() -> String {
 
 /// `trigger <module_id> update|popup`
 fn handle_trigger(args: &str) -> String {
-    let mut tokens = args.split_whitespace();
-    let Some(module_id) = tokens.next() else {
+    let tokens = match tokenize_args(args) {
+        Ok(tokens) => tokens,
+        Err(err) => return format!("ERR: {}", err),
+    };
+
+    let Some((module_id, rest)) = tokens.split_first() else {
         return "ERR: trigger requires <module_id> <event>".to_string();
     };
-    let Some(event) = tokens.next() else {
+    let Some(event) = rest.first() else {
         return "ERR: trigger requires <event> (update|popup)".to_string();
     };
+
+    if !matches!(event.as_str(), "update" | "popup") {
+        return format!(
+            "ERR: unknown event '{}', expected one of: update, popup",
+            event
+        );
+    }
 
     push_ipc_command(IpcCommand::Trigger {
         module_id: module_id.to_string(),
@@ -331,6 +413,26 @@ mod tests {
         assert_eq!(v, "🔥");
     }
 
+    // -- tokenize_args ------------------------------------------------------
+
+    #[test]
+    fn tokenize_args_respects_quotes() {
+        let tokens = tokenize_args("mymod label=\"hello world\" icon=🔥").unwrap();
+        assert_eq!(tokens, vec!["mymod", "label=hello world", "icon=🔥"]);
+    }
+
+    #[test]
+    fn tokenize_args_rejects_unterminated_quote() {
+        let err = tokenize_args("mymod label=\"hello").unwrap_err();
+        assert!(err.contains("unterminated quote"));
+    }
+
+    #[test]
+    fn tokenize_args_rejects_trailing_escape() {
+        let err = tokenize_args("mymod label=hello\\").unwrap_err();
+        assert!(err.contains("trailing escape"));
+    }
+
     // -- rgba_to_hex --------------------------------------------------------
 
     #[test]
@@ -417,6 +519,12 @@ mod tests {
         assert!(resp.contains("nope"));
     }
 
+    #[test]
+    fn handle_set_accepts_quoted_space_value() {
+        let resp = handle_set("mymod label=\"hello world\"");
+        assert_eq!(resp, "OK");
+    }
+
     // -- handle_get error paths ---------------------------------------------
 
     #[test]
@@ -445,6 +553,13 @@ mod tests {
         let resp = handle_trigger("mymod");
         assert!(resp.starts_with("ERR:"));
         assert!(resp.contains("event"));
+    }
+
+    #[test]
+    fn handle_trigger_unknown_event() {
+        let resp = handle_trigger("mymod invalid");
+        assert!(resp.starts_with("ERR:"));
+        assert!(resp.contains("unknown event"));
     }
 
     // -- handle_list --------------------------------------------------------

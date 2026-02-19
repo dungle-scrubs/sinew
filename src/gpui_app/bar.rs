@@ -112,6 +112,7 @@ pub struct BarView {
 impl BarView {
     pub fn new() -> Self {
         let config = load_config();
+        let camera_indicator = config.bar.camera_indicator;
         let theme = Theme::from_config(&config.bar);
         let (left_outer, left_inner, right_outer, right_inner) = Self::build_modules(&config);
         let shared_config: SharedConfig = Arc::new(RwLock::new(config));
@@ -135,7 +136,7 @@ impl BarView {
             // Initialize to past so first render triggers update immediately
             last_update: Instant::now() - update_interval,
             update_interval,
-            camera_indicator: true, // TODO: read from config
+            camera_indicator,
             last_camera_active: camera::is_camera_active(),
             ipc_rx: ipc::subscribe_ipc_commands(),
             refresh_task: None,
@@ -336,6 +337,7 @@ impl BarView {
 
                     // Update theme
                     self.theme = Theme::from_config(&config.bar);
+                    self.camera_indicator = config.bar.camera_indicator;
 
                     // Rebuild modules
                     let (left_outer, left_inner, right_outer, right_inner) =
@@ -505,9 +507,21 @@ impl BarView {
 /// Execute a shell command in the background.
 fn execute_command(command: &str) {
     let cmd = command.to_string();
-    std::thread::spawn(move || {
-        let _ = Command::new("sh").args(["-c", &cmd]).spawn();
-    });
+    std::thread::spawn(
+        move || match Command::new("sh").args(["-c", &cmd]).status() {
+            Ok(status) if status.success() => {}
+            Ok(status) => {
+                log::warn!(
+                    "Click command exited with status {:?}: {}",
+                    status.code(),
+                    cmd
+                );
+            }
+            Err(err) => {
+                log::warn!("Failed to execute click command '{}': {}", cmd, err);
+            }
+        },
+    );
 }
 
 impl Render for BarView {

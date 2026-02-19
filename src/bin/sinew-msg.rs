@@ -10,6 +10,33 @@ fn socket_path() -> PathBuf {
     PathBuf::from(runtime_dir).join("sinew.sock")
 }
 
+fn quote_arg(arg: &str) -> String {
+    if arg.is_empty() {
+        return "\"\"".to_string();
+    }
+
+    let needs_quotes = arg
+        .chars()
+        .any(|c| c.is_whitespace() || matches!(c, '"' | '\\'));
+    if !needs_quotes {
+        return arg.to_string();
+    }
+
+    let escaped = arg
+        .chars()
+        .flat_map(|c| match c {
+            '\\' => "\\\\".chars().collect::<Vec<char>>(),
+            '"' => "\\\"".chars().collect::<Vec<char>>(),
+            '\n' => "\\n".chars().collect::<Vec<char>>(),
+            '\r' => "\\r".chars().collect::<Vec<char>>(),
+            '\t' => "\\t".chars().collect::<Vec<char>>(),
+            other => vec![other],
+        })
+        .collect::<String>();
+
+    format!("\"{}\"", escaped)
+}
+
 fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
 
@@ -27,7 +54,11 @@ fn main() {
         std::process::exit(1);
     }
 
-    let command = args.join(" ");
+    let command = args
+        .iter()
+        .map(|arg| quote_arg(arg))
+        .collect::<Vec<_>>()
+        .join(" ");
     let socket = socket_path();
 
     match UnixStream::connect(&socket) {

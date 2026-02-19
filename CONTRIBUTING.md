@@ -15,12 +15,22 @@ Thank you for considering contributing to Sinew!
    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
    ```
 
-3. Build the project:
+3. Install local git hooks:
+   ```bash
+   .githooks/install.sh
+   ```
+
+4. Install TruffleHog (required by pre-push hook):
+   ```bash
+   brew install trufflehog
+   ```
+
+5. Build the project:
    ```bash
    cargo build
    ```
 
-4. Run with debug logging:
+6. Run with debug logging:
    ```bash
    RUST_LOG=debug cargo run
    ```

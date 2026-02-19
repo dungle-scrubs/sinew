@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1](https://github.com/dungle-scrubs/sinew/compare/v0.3.0...v0.3.1) (2026-02-19)
+
+
+### Bug Fixes
+
+* **bar:** honor camera config and harden clicks ([3afd6d5](https://github.com/dungle-scrubs/sinew/commit/3afd6d542c28f8614d7a396db4d655439ea42b95))
+* **ipc:** handle quoted args and strict triggers ([051a391](https://github.com/dungle-scrubs/sinew/commit/051a391e999398846ea0560e99013f2a356ab78e))
+* **popup:** defer AppKit mutations and add Esc close ([70e1b72](https://github.com/dungle-scrubs/sinew/commit/70e1b725ec22562b12283cf52238491a85b39218))
+* stabilize popup windowing and harden IPC ([1b74ef5](https://github.com/dungle-scrubs/sinew/commit/1b74ef56bd6fbcbf56c886d3b7cf62328c5cf009))
+
 ## [0.3.0] - 2026-02-15
 
 ### Added

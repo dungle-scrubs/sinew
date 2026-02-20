@@ -775,9 +775,19 @@ pub fn warmup_popups() {
         popup_height, panel_height
     ));
 
+    // Warm-up show operations are deferred to the next run-loop turn.
+    // Queue the hide after those deferred shows so windows don't get left visible.
     let _ = window_ops().show_popup_window(PopupType::Popup, popup_height);
     let _ = window_ops().show_popup_window(PopupType::Panel, panel_height);
-    window_ops().hide_all_popup_windows();
+
+    let hide_block = RcBlock::new(move || {
+        window_ops().hide_all_popup_windows();
+        remove_global_click_monitor();
+        remove_global_key_monitor();
+    });
+    unsafe {
+        NSRunLoop::mainRunLoop().performBlock(&hide_block);
+    }
 
     trace_popup("warmup_popups done");
 }
@@ -1079,8 +1089,10 @@ fn hide_all_popup_windows_appkit() {
             unsafe {
                 let _: () = objc2::msg_send![&ns_window, setLevel: -20_i64];
             }
+            // Keep hidden windows non-visible and non-interactive.
+            // We use close+show=false on creation, so alpha-only hiding is enough.
             ns_window.setAlphaValue(0.0);
-            ns_window.setIgnoresMouseEvents(true); // Don't block mouse when hidden
+            ns_window.setIgnoresMouseEvents(true);
             use objc2_app_kit::NSWindowAnimationBehavior;
             ns_window.setAnimationBehavior(NSWindowAnimationBehavior::None);
             hidden_count += 1;

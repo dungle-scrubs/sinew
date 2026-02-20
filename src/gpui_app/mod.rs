@@ -46,21 +46,26 @@ pub fn run() {
         // Load config
         let config = load_config();
         crate::launch_agent::sync(config.bar.launch_at_login);
-        let bar_height = config.bar.height.unwrap_or(32.0);
 
         // Get screen info
         let screen_info = get_main_screen_info(mtm).expect("No screen found");
         let (screen_x, screen_y, screen_width, screen_height) = screen_info.frame;
-
-        // Calculate macOS Y coordinate (bottom-left origin)
-        // Top of screen = screen_y + screen_height - bar_height
-        let macos_y = screen_y + screen_height - bar_height;
+        let configured_bar_height = config.bar.height;
+        let (bar_height, macos_y) = if let Some(height) = configured_bar_height {
+            // User override: place the bar by its explicit height.
+            (height, screen_y + screen_height - height)
+        } else {
+            // Auto mode: pin to the exact visible-frame edge used by macOS windows.
+            (screen_info.menu_bar_height, screen_info.menu_bar_origin_y)
+        };
 
         log::info!(
-            "Creating GPUI menu bar: screen={}x{}, bar_height={}, macos_y={}",
+            "Creating GPUI menu bar: screen={}x{}, bar_height={} (config={:?}, system={}), macos_y={}",
             screen_width,
             screen_height,
             bar_height,
+            configured_bar_height,
+            screen_info.menu_bar_height,
             macos_y
         );
 
@@ -149,12 +154,20 @@ fn schedule_window_configuration(
         configure_popup_window(mtm, popup_x, bar_y, popup_width, popup_height);
 
         popup_manager::hide_popups_on_create();
-        popup_manager::warmup_popups();
+        if popup_warmup_enabled() {
+            popup_manager::warmup_popups();
+        }
     });
 
     unsafe {
         NSRunLoop::mainRunLoop().performBlock(&block);
     }
+}
+
+fn popup_warmup_enabled() -> bool {
+    std::env::var("SINEW_WARMUP_POPUPS")
+        .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+        .unwrap_or(false)
 }
 
 /// Hides the app from Dock/Cmd+Tab and sets the app icon.
@@ -237,7 +250,7 @@ fn create_panel_window(
                 kind: WindowKind::PopUp,
                 is_movable: false,
                 focus: false,
-                show: true,
+                show: false,
                 window_background: gpui::WindowBackgroundAppearance::Opaque,
                 ..Default::default()
             },
@@ -339,7 +352,7 @@ fn create_popup_window(
                 kind: WindowKind::PopUp,
                 is_movable: false,
                 focus: false,
-                show: true,
+                show: false,
                 window_background: gpui::WindowBackgroundAppearance::Opaque,
                 ..Default::default()
             },

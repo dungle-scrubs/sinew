@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.4](https://github.com/dungle-scrubs/sinew/compare/v0.3.3...v0.3.4) (2026-02-20)
+
+
+### Bug Fixes
+
+* **release:** sync Cargo.toml to 0.3.4 ([d7fead2](https://github.com/dungle-scrubs/sinew/commit/d7fead28f923f74aab6b263226bf0f9b4f3b4764))
+* **release:** sync Cargo.toml to 0.3.4 ([4e84d92](https://github.com/dungle-scrubs/sinew/commit/4e84d9248bb17c92ffa06aece32cdf5cbec23d0d))
+
 ## [0.3.3](https://github.com/dungle-scrubs/sinew/compare/v0.3.2...v0.3.3) (2026-02-20)
 
 
